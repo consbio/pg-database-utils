@@ -1,0 +1,3 @@
+[run]
+source = pg_database
+data_file = .coverage

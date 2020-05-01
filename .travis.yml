@@ -1,0 +1,16 @@
+language: python
+python:
+  - "3.6"
+  - "3.5"
+  - "3.4"
+
+install:
+  - "pip install sqlalchemy"
+  - "pip install sqlalchemy_utils"
+  - "pip install coveralls"
+
+script:
+  coverage run --source=pg_database -m unittest pg_database.tests.tests
+
+after_success:
+  coveralls
