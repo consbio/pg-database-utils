@@ -33,7 +33,7 @@ setup(
         'pg_database', 'pg_database.tests'
     ],
     install_requires=[
-        'sqlalchemy>=1.3.0"', 'sqlalchemy_utils>=0.36.0'
+        'sqlalchemy>=1.3.0"', 'sqlalchemy_utils>=0.36.0, GeoAlchemy2>=0.7.0'
     ],
     url='https://github.com/consbio/pg-database-utils',
     license='BSD',
