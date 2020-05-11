@@ -2,6 +2,7 @@
 .cache/
 .coverage
 __pycache__/
-build/
-dist/
-pg_database_utils.egg-info/
+/build/
+/dist/
+/pg_database_utils.egg-info/
+/db.json
