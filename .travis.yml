@@ -28,6 +28,7 @@ install:
   - pip install tox
 
 before_script:
+  - psql -c 'CREATE ROLE travis SUPERUSER LOGIN CREATEDB;' -U postgres
   - psql -c 'create database pg_database;' -U postgres
   - psql -c 'CREATE EXTENSION postgis;' -U postgres -d pg_database
   - psql -c 'CREATE EXTENSION postgis_topology;' -U postgres -d pg_database
