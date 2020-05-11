@@ -14,28 +14,28 @@ class RunTests(Command):
         pass
 
     def run(self):
-        errno = subprocess.call([sys.executable, '-m', 'unittest', 'pg_database.tests.tests'])
+        errno = subprocess.call([sys.executable, "-m", "unittest", "pg_database.tests.tests"])
         raise SystemExit(errno)
 
 
-with open('README.md') as readme:
+with open("README.md") as readme:
     long_description = readme.read()
 
-
 setup(
-    name='pg_database_utils',
-    description='A suite of utilities for PostgreSQL database queries and operations built on sqlalchemy',
+    url="https://github.com/consbio/pg-database-utils",
+    name="pg_database_utils",
+    description="A suite of utilities for PostgreSQL database queries and operations built on sqlalchemy",
     long_description=long_description,
-    long_description_content_type='text/markdown',
-    keywords='postgres,postgresql,utils,utilities,pg_database,sqlalchemy,sqlalchemy_utils',
-    version='0.1',
+    long_description_content_type="text/markdown",
+    keywords="postgres,postgresql,utils,utilities,pg_database,sqlalchemy",
+    version="0.1",
+    license="BSD",
     packages=[
-        'pg_database', 'pg_database.tests'
+        "pg_database", "pg_database.tests"
     ],
     install_requires=[
-        'sqlalchemy>=1.3.0"', 'sqlalchemy_utils>=0.36.0, GeoAlchemy2>=0.7.0'
+        "psycopg2-binary>=2.7.7", "sqlalchemy>=1.3.0", "GeoAlchemy2>=0.7.0"
     ],
-    url='https://github.com/consbio/pg-database-utils',
-    license='BSD',
-    cmdclass={'test': RunTests}
+    tests_require=["pytest", "pytest-django"],
+    cmdclass={"test": RunTests}
 )

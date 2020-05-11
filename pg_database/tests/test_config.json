@@ -1,0 +1,4 @@
+{
+    "database-name": "pg_database",
+    "django-database": "default"
+}
