@@ -1,5 +1,4 @@
 import subprocess
-import sys
 
 from setuptools import Command, setup
 
@@ -14,7 +13,7 @@ class RunTests(Command):
         pass
 
     def run(self):
-        errno = subprocess.call([sys.executable, "-m", "unittest", "pg_database.tests.tests"])
+        errno = subprocess.call(["py.test", "pg_database/tests/tests.py", "--cov=pg_database", "--cov-branch"])
         raise SystemExit(errno)
 
 
@@ -36,6 +35,6 @@ setup(
     install_requires=[
         "psycopg2-binary>=2.7.7", "sqlalchemy>=1.3.0", "GeoAlchemy2>=0.7.0"
     ],
-    tests_require=["pytest", "pytest-django"],
+    tests_require=["pytest", "pytest-cov"],
     cmdclass={"test": RunTests}
 )
