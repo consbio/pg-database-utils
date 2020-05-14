@@ -11,8 +11,8 @@ from sqlalchemy.engine.url import URL
 from sqlalchemy.sql import func, text, sqltypes
 from sqlalchemy.schema import AddConstraint, DropConstraint, ForeignKeyConstraint, MetaData
 
-from pg_database.conf import PgDatabaseSettings, settings
-from pg_database.conf import DEFAULT_USER, DEFAULT_ENGINE, DEFAULT_PORT, DJANGO_SETTINGS_VAR, ENVIRONMENT_VARIABLE
+from pg_database import conf
+from pg_database.conf import PgDatabaseSettings
 from pg_database.schema import create_foreign_key, create_column, create_index, create_table, create_tsvector_column
 from pg_database.schema import alter_column_type, drop_foreign_key, drop_column, drop_index, drop_table
 from pg_database.sql import query_tsvector_columns, query_json_keys
@@ -21,6 +21,15 @@ from pg_database.sql import insert_from, insert_into, select_from, select_into, 
 from pg_database.types import DATE_FORMAT, DATETIME_FORMAT
 
 
+DJANGO_SETTINGS_VAR = conf.DJANGO_SETTINGS_VAR
+ENVIRONMENT_VARIABLE = conf.ENVIRONMENT_VARIABLE
+DEFAULT_ENGINE = conf.DEFAULT_ENGINE
+DEFAULT_PORT = conf.DEFAULT_PORT
+DEFAULT_USER = conf.DEFAULT_USER
+EMPTY = conf.EMPTY
+
+DATABASE_INFO = conf.settings.database_info
+DATABASE_NAME = conf.settings.database_name
 SITE_TABLE_NAME = "site_table"
 ALL_TEST_TABLES = (SITE_TABLE_NAME, f"test_{SITE_TABLE_NAME}", f"tmp_{SITE_TABLE_NAME}")
 
@@ -291,17 +300,27 @@ def refresh_metadata(meta):
 @pytest.fixture()
 def db_settings():
 
-    db_env = os.environ.pop(ENVIRONMENT_VARIABLE)
-    dj_env = os.environ.pop(DJANGO_SETTINGS_VAR)
+    db_env = os.environ.pop(ENVIRONMENT_VARIABLE, "")
+    dj_env = os.environ.pop(DJANGO_SETTINGS_VAR, "")
 
     yield {
         ENVIRONMENT_VARIABLE: db_env,
         DJANGO_SETTINGS_VAR: dj_env,
-        "DJANGO_CONFIGURED": hasattr(settings._django_settings, "DATABASES")
+        "DJANGO_CONFIGURED": conf.settings._django_settings is not EMPTY
     }
 
-    os.environ[ENVIRONMENT_VARIABLE] = db_env
-    os.environ["DJANGO_SETTINGS_MODULE"] = dj_env
+    if db_env:
+        os.environ[ENVIRONMENT_VARIABLE] = db_env
+    if dj_env:
+        os.environ["DJANGO_SETTINGS_MODULE"] = dj_env
+        reload_django_settings(conf.settings)
+
+
+def reload_django_settings(db_settings):
+    try:
+        db_settings._django_settings._wrapped = EMPTY
+    except Exception:
+        pass
 
 
 def test_conf_settings_init(db_settings):
@@ -310,9 +329,9 @@ def test_conf_settings_init(db_settings):
 
     # Should not raise errors
 
-    settings._init_database_config()
-    settings._init_django_settings()
-    settings._init_database_info()
+    conf.settings._init_database_config()
+    conf.settings._init_django_settings()
+    conf.settings._init_database_info()
 
     # Test with invalid database configurations
 
@@ -341,58 +360,63 @@ def test_conf_settings_dbinfo(db_settings):
 
     # Test with no settings configured
     with pytest.raises(EnvironmentError, match=no_config_message):
+        reload_django_settings(conf.settings)
         PgDatabaseSettings().database_info
 
     # Test with no db config and broken Django settings
     os.environ[DJANGO_SETTINGS_VAR] = dj_env.replace("settings", "not_settings")
     with pytest.raises(EnvironmentError, match=no_config_message):
+        reload_django_settings(conf.settings)
         PgDatabaseSettings().database_info
 
     # Test with no db config and invalid Django settings
     os.environ[DJANGO_SETTINGS_VAR] = dj_env.replace("settings", "invalid_settings")
     with pytest.raises(EnvironmentError, match=invalid_dj_message):
+        reload_django_settings(conf.settings)
         PgDatabaseSettings().database_info
 
     # Test with invalid db config and Django settings
     os.environ[ENVIRONMENT_VARIABLE] = db_env.replace("test_config", "invalid_config")
     with pytest.raises(EnvironmentError, match=config_key_message):
+        reload_django_settings(conf.settings)
         PgDatabaseSettings().database_info
 
     # Test with valid db config and Django settings
 
     os.environ[ENVIRONMENT_VARIABLE] = db_env
     os.environ["DJANGO_SETTINGS_MODULE"] = dj_env
+    reload_django_settings(conf.settings)
 
-    settings = PgDatabaseSettings()
+    test_settings = PgDatabaseSettings()
 
     if not django_configured:
-        assert settings.database_info["username"] == DEFAULT_USER
-        assert settings.django_database == {}
+        assert test_settings.database_info["username"] == DEFAULT_USER
+        assert test_settings.django_database == {}
     else:
-        assert settings.django_database["ENGINE"] == "django.db.backends.postgresql"
-        assert settings.django_database["NAME"] == "pg_database"
-        assert settings.django_database["USER"] == "django"
+        assert test_settings.django_database["ENGINE"] == "django.db.backends.postgresql"
+        assert test_settings.django_database["NAME"] == "pg_database"
+        assert test_settings.django_database["USER"] == "django"
 
-    assert settings.database_info["database"] == "pg_database"
-    assert settings.database_info["drivername"] == DEFAULT_ENGINE
-    assert settings.database_info["port"] == DEFAULT_PORT
-    assert settings.database_info["host"] is None
-    assert settings.database_info["password"] is None
+    assert test_settings.database_info["database"] == "pg_database"
+    assert test_settings.database_info["drivername"] == DEFAULT_ENGINE
+    assert test_settings.database_info["port"] == DEFAULT_PORT
+    assert test_settings.database_info["host"] is None
+    assert test_settings.database_info["password"] is None
 
 
 def db_create(postgres_engine):
 
     database_exists = postgres_engine.execute(
-        f"SELECT TRUE FROM pg_catalog.pg_database WHERE datname='{settings.database_name}'"
+        f"SELECT TRUE FROM pg_catalog.pg_database WHERE datname='{DATABASE_NAME}'"
     )
     if database_exists.scalar():
         return
 
-    postgres_engine.execute(f"CREATE DATABASE {settings.database_name} ENCODING 'utf8'")
+    postgres_engine.execute(f"CREATE DATABASE {DATABASE_NAME} ENCODING 'utf8'")
 
     database_engine = create_engine(URL(
-        drivername=settings.database_engine,
-        database=settings.database_name,
+        drivername=DATABASE_INFO["drivername"],
+        database=DATABASE_INFO["database"],
         username="postgres",
     ))
     with database_engine.connect() as conn:
@@ -405,9 +429,9 @@ def db_drop(postgres_engine):
     with postgres_engine.connect() as conn:
         conn.execute(
             "SELECT pg_terminate_backend(pid) FROM pg_catalog.pg_stat_activity "
-            f"WHERE pid <> pg_backend_pid() AND datname = '{settings.database_name}'"
+            f"WHERE pid <> pg_backend_pid() AND datname = '{DATABASE_NAME}'"
         )
-        conn.execute(f"DROP DATABASE {settings.database_name}")
+        conn.execute(f"DROP DATABASE {DATABASE_NAME}")
 
 
 @pytest.fixture(scope='session')
@@ -416,7 +440,7 @@ def db_engine():
     postgres_engine = create_engine("postgresql:///postgres", isolation_level="AUTOCOMMIT")
 
     db_create(postgres_engine)
-    engine = create_engine(URL(**settings.database_info))
+    engine = create_engine(URL(**DATABASE_INFO))
 
     yield engine
 
@@ -463,7 +487,7 @@ def db_metadata(db_engine):
 def test_database_setup(db_metadata):
     database_query = db_metadata.bind.execute(
         "SELECT TRUE FROM pg_catalog.pg_database "
-        f"WHERE datname='{settings.database_name}'"
+        f"WHERE datname='{DATABASE_NAME}'"
     )
     assert database_query.scalar()
 

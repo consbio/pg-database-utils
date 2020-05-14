@@ -28,6 +28,13 @@ SUPPORTED_CONFIG = {
 }
 
 
+try:
+    from django.utils.functional import empty
+    EMPTY = empty
+except ImportError:
+    EMPTY = object()
+
+
 class PgDatabaseSettings(object):
 
     _database_info = None
@@ -77,7 +84,7 @@ class PgDatabaseSettings(object):
         if self._django_settings is not None:
             return
 
-        self._django_settings = object()
+        self._django_settings = EMPTY
 
         try:
             from django.core.exceptions import ImproperlyConfigured
@@ -126,8 +133,8 @@ class PgDatabaseSettings(object):
             self._database_config["database-engine"] = (django_database.get("ENGINE") or DEFAULT_ENGINE).split(".")[-1]
             self._database_config["database-host"] = django_database.get("HOST") or DEFAULT_HOST
             self._database_config["database-port"] = django_database.get("PORT") or DEFAULT_PORT
-            self._database_config["database-name"] = django_database["NAME"]
-            self._database_config["database-user"] = django_database["USER"]
+            self._database_config["database-name"] = django_database.get("NAME")
+            self._database_config["database-user"] = django_database.get("USER")
             self._database_config["database-password"] = django_database.get("PASSWORD")
 
             self._django_database = django_database
