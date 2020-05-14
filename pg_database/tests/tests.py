@@ -2,6 +2,7 @@ import copy
 import datetime
 import decimal
 import json
+import os
 import pytest
 
 from sqlalchemy import create_engine, Column, Index, Table, select
@@ -10,7 +11,8 @@ from sqlalchemy.engine.url import URL
 from sqlalchemy.sql import func, text, sqltypes
 from sqlalchemy.schema import AddConstraint, DropConstraint, ForeignKeyConstraint, MetaData
 
-from pg_database.conf import settings
+from pg_database.conf import PgDatabaseSettings, settings
+from pg_database.conf import DEFAULT_USER, DEFAULT_ENGINE, DEFAULT_PORT, DJANGO_SETTINGS_VAR, ENVIRONMENT_VARIABLE
 from pg_database.schema import create_foreign_key, create_column, create_index, create_table, create_tsvector_column
 from pg_database.schema import alter_column_type, drop_foreign_key, drop_column, drop_index, drop_table
 from pg_database.sql import query_tsvector_columns, query_json_keys
@@ -284,6 +286,98 @@ def refresh_metadata(meta):
     metadata = MetaData(meta.bind)
     metadata.reflect()
     return metadata
+
+
+@pytest.fixture()
+def db_settings():
+
+    db_env = os.environ.pop(ENVIRONMENT_VARIABLE)
+    dj_env = os.environ.pop(DJANGO_SETTINGS_VAR)
+
+    yield {
+        ENVIRONMENT_VARIABLE: db_env,
+        DJANGO_SETTINGS_VAR: dj_env,
+        "DJANGO_CONFIGURED": hasattr(settings._django_settings, "DATABASES")
+    }
+
+    os.environ[ENVIRONMENT_VARIABLE] = db_env
+    os.environ["DJANGO_SETTINGS_MODULE"] = dj_env
+
+
+def test_conf_settings_init(db_settings):
+
+    db_env = db_settings[ENVIRONMENT_VARIABLE]
+
+    # Should not raise errors
+
+    settings._init_database_config()
+    settings._init_django_settings()
+    settings._init_database_info()
+
+    # Test with invalid database configurations
+
+    os.environ[ENVIRONMENT_VARIABLE] = db_env.replace("json", "txt")
+    with pytest.raises(EnvironmentError, match="Invalid database configuration file"):
+        PgDatabaseSettings()
+
+    os.environ[ENVIRONMENT_VARIABLE] = db_env.replace("config", "nope")
+    with pytest.raises(EnvironmentError, match="Database configuration file does not exist"):
+        PgDatabaseSettings()
+
+    os.environ[ENVIRONMENT_VARIABLE] = db_env.replace("test_config", "not")
+    with pytest.raises(EnvironmentError, match="Database configuration file does not contain JSON"):
+        PgDatabaseSettings()
+
+
+def test_conf_settings_dbinfo(db_settings):
+
+    db_env = db_settings[ENVIRONMENT_VARIABLE]
+    dj_env = db_settings[DJANGO_SETTINGS_VAR]
+
+    django_configured = db_settings["DJANGO_CONFIGURED"]
+    no_config_message = "No database configuration available"
+    config_key_message = "Database configuration missing required key"
+    invalid_dj_message = config_key_message if django_configured else no_config_message
+
+    # Test with no settings configured
+    with pytest.raises(EnvironmentError, match=no_config_message):
+        PgDatabaseSettings().database_info
+
+    # Test with no db config and broken Django settings
+    os.environ[DJANGO_SETTINGS_VAR] = dj_env.replace("settings", "not_settings")
+    with pytest.raises(EnvironmentError, match=no_config_message):
+        PgDatabaseSettings().database_info
+
+    # Test with no db config and invalid Django settings
+    os.environ[DJANGO_SETTINGS_VAR] = dj_env.replace("settings", "invalid_settings")
+    with pytest.raises(EnvironmentError, match=invalid_dj_message):
+        PgDatabaseSettings().database_info
+
+    # Test with invalid db config and Django settings
+    os.environ[ENVIRONMENT_VARIABLE] = db_env.replace("test_config", "invalid_config")
+    with pytest.raises(EnvironmentError, match=config_key_message):
+        PgDatabaseSettings().database_info
+
+    # Test with valid db config and Django settings
+
+    os.environ[ENVIRONMENT_VARIABLE] = db_env
+    os.environ["DJANGO_SETTINGS_MODULE"] = dj_env
+
+    settings = PgDatabaseSettings()
+
+    if not django_configured:
+        assert settings.database_info["username"] == DEFAULT_USER
+        assert settings.django_database == {}
+    else:
+        assert settings.django_database["ENGINE"] == "django.db.backends.postgresql"
+        assert settings.django_database["NAME"] == "pg_database"
+        assert settings.django_database["USER"] == "django"
+
+    assert settings.database_info["database"] == "pg_database"
+    assert settings.database_info["drivername"] == DEFAULT_ENGINE
+    assert settings.database_info["port"] == DEFAULT_PORT
+    assert settings.database_info["host"] is None
+    assert settings.database_info["password"] is None
 
 
 def db_create(postgres_engine):

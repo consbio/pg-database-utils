@@ -1,0 +1,1 @@
+# Missing SECRET_KEY and DATABASES

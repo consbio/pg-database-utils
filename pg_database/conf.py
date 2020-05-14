@@ -5,11 +5,14 @@ import pathlib
 
 logger = logging.getLogger(__name__)
 
+DJANGO_SETTINGS_VAR = "DJANGO_SETTINGS_MODULE"
 ENVIRONMENT_VARIABLE = "DATABASE_CONFIG_JSON"
 
+DEFAULT_DJANGO_DB = "unspecified"
 DEFAULT_ENGINE = "postgresql"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 5432
+DEFAULT_USER = "postgres"
 
 SUPPORTED_CONFIG = {
     # Required database configuration
@@ -21,7 +24,7 @@ SUPPORTED_CONFIG = {
     "database-user": "postgres",
     "database-password": None,
     # Optionally specify configured Django database
-    "django-database": "unspecified",
+    "django-database": DEFAULT_DJANGO_DB,
 }
 
 
@@ -30,6 +33,7 @@ class PgDatabaseSettings(object):
     _database_info = None
     _database_config = None
     _django_settings = None
+    _django_database = None
 
     def __init__(self):
         self._init_database_config()
@@ -73,7 +77,7 @@ class PgDatabaseSettings(object):
         if self._django_settings is not None:
             return
 
-        self._django_settings = {}
+        self._django_settings = object()
 
         try:
             from django.core.exceptions import ImproperlyConfigured
@@ -90,14 +94,14 @@ class PgDatabaseSettings(object):
         except ImportError as ex:
             logger.debug(f"Django is not configured: {ex}")
 
-    @property
-    def database_info(self):
+    def _init_database_info(self):
         """ Lazily initializes database info from configuration file or Django settings """
 
         if self._database_info is not None:
-            return dict(self._database_info)
+            return
 
         self._database_info = {}
+        self._django_database = {}
 
         # Validate and apply database configuration
 
@@ -112,7 +116,7 @@ class PgDatabaseSettings(object):
         elif not django_databases:
             logger.debug("Using provided database configuration")
 
-        elif not self._database_config or self._database_config.get("django-database") != "unspecified":
+        elif not self._database_config or self._database_config.get("django-database") != DEFAULT_DJANGO_DB:
             logger.debug("Applying Django database configuration")
 
             django_database = self._database_config.get("django-database") or "default"
@@ -125,6 +129,8 @@ class PgDatabaseSettings(object):
             self._database_config["database-name"] = django_database["NAME"]
             self._database_config["database-user"] = django_database["USER"]
             self._database_config["database-password"] = django_database.get("PASSWORD")
+
+            self._django_database = django_database
 
         for database_key in ("database-name", "database-user"):
             if self._database_config[database_key] is None:
@@ -143,7 +149,17 @@ class PgDatabaseSettings(object):
         if self._database_info["password"] is None:
             self._database_info["host"] = None
 
+    @property
+    def database_info(self):
+        if self._database_info is None:
+            self._init_database_info()
         return dict(self._database_info)
+
+    @property
+    def django_database(self):
+        if self._django_database is None:
+            self._init_database_info()
+        return dict(self._django_database)
 
     @property
     def database_engine(self):
