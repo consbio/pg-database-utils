@@ -79,7 +79,7 @@ class PgDatabaseSettings(object):
             self._database_config.update({k: v for k, v in SUPPORTED_CONFIG.items() if k not in self._database_config})
 
     def _init_django_settings(self):
-        """ Determine whether Django is present and configured () """
+        """ Capture properly configured Django settings if Django is present and configured """
 
         if self._django_settings is not None:
             return
@@ -102,7 +102,7 @@ class PgDatabaseSettings(object):
             logger.debug(f"Django is not configured: {ex}")
 
     def _init_database_info(self):
-        """ Lazily initializes database info from configuration file or Django settings """
+        """ Lazily initialize database info from configuration file or Django settings """
 
         if self._database_info is not None:
             return
@@ -186,7 +186,7 @@ class PgDatabaseSettings(object):
 
     @property
     def database_user(self):
-        return (self._database_info or self.database_info)["user"]
+        return (self._database_info or self.database_info)["username"]
 
     @property
     def database_password(self):

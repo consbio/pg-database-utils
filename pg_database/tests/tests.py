@@ -391,17 +391,25 @@ def test_conf_settings_dbinfo(db_settings):
 
     if not django_configured:
         assert test_settings.database_info["username"] == DEFAULT_USER
+        assert test_settings.database_user == DEFAULT_USER
         assert test_settings.django_database == {}
     else:
         assert test_settings.django_database["ENGINE"] == "django.db.backends.postgresql"
         assert test_settings.django_database["NAME"] == "pg_database"
         assert test_settings.django_database["USER"] == "django"
+        assert test_settings.database_user == "django"
 
     assert test_settings.database_info["database"] == "pg_database"
     assert test_settings.database_info["drivername"] == DEFAULT_ENGINE
     assert test_settings.database_info["port"] == DEFAULT_PORT
     assert test_settings.database_info["host"] is None
     assert test_settings.database_info["password"] is None
+
+    assert test_settings.database_name == "pg_database"
+    assert test_settings.database_engine == DEFAULT_ENGINE
+    assert test_settings.database_port == DEFAULT_PORT
+    assert test_settings.database_host is None
+    assert test_settings.database_password is None
 
 
 def db_create(postgres_engine):
