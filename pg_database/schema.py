@@ -7,7 +7,7 @@ from sqlalchemy.sql import and_, func, Select
 
 from .conf import settings
 from .types import column_type_for
-from .validation import SAFE_SQL_REGEX
+from .validation import validate_columns_in, validate_sql_params
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ def get_table(name):
     try:
         return Table(name, MetaData(engine), autoload=True, autoload_with=engine)
     except exc.NoSuchTableError:
-        raise ValueError(f'No table named: "{name}"')
+        raise ValueError(f'No table named "{name}"')
 
 
 def get_table_count(table_or_name):
@@ -76,17 +76,18 @@ def table_exists(table_or_name):
 
 def create_table(table_name, index_cols=None, drop_first=True, **column_types):
 
-    if not SAFE_SQL_REGEX.match(table_name or ""):
-        raise ValueError(f"Invalid table name: {table_name}")
-    if not column_types:
-        raise ValueError(f"No columns specified for {table_name}")
+    validate_sql_params(table=table_name, empty_message=f"No table name specified")
+    validate_sql_params(
+        column_names=[cname for cname in column_types.keys()],
+        empty_message=f"No column names specified for {table_name}"
+    )
 
     meta = get_metadata()
     exists = table_name in meta.tables
 
     if exists and not drop_first:
         raise ValueError(f"Table already exists: {table_name}")
-    elif drop_first:
+    elif exists and drop_first:
         meta.tables[table_name].drop(checkfirst=True)
         meta = get_metadata()
 
@@ -133,12 +134,7 @@ def alter_column_type(table_or_name, column_name, new_type):
     else:
         table_name = table_or_name.name
 
-    if not SAFE_SQL_REGEX.match(table_name or ""):
-        raise ValueError(f"Invalid table name: {table_name}")
-    if not SAFE_SQL_REGEX.match(column_name or ""):
-        raise ValueError(f"Invalid column name: {column_name}")
-    if not SAFE_SQL_REGEX.match(new_type or ""):
-        raise ValueError(f"Invalid SQL type: {new_type}")
+    validate_sql_params(table=table_name, column=column_name, column_type=new_type)
 
     if new_type != "bool":
         using = f"{column_name}::{new_type}"
@@ -161,16 +157,11 @@ def create_column(table_or_name, column_name, column_type, checkfirst=False, def
     else:
         table_name = table_or_name.name
 
-    if not SAFE_SQL_REGEX.match(table_name or ""):
-        raise ValueError(f"Invalid table name: {table_name}")
-    if not SAFE_SQL_REGEX.match(column_name or ""):
-        raise ValueError(f"Invalid column name: {column_name}")
-    if not SAFE_SQL_REGEX.match(column_type or ""):
-        raise ValueError(f"Invalid column type: {column_type}")
+    validate_sql_params(table=table_name, column=column_name, column_type=column_type)
 
     str_default = isinstance(default, str)
-    if str_default and not SAFE_SQL_REGEX.match(default):
-        raise ValueError(f"Invalid default value: {default}")
+    if str_default:
+        validate_sql_params(default_value=default)
 
     alter_table = f"ALTER TABLE {table_name} "
 
@@ -208,13 +199,7 @@ def create_tsvector_column(table_or_name, column_name, column_names, index_name)
     else:
         table_name = table_or_name.name
 
-    if not SAFE_SQL_REGEX.match(table_name):
-        raise ValueError(f"Invalid table name: {table_name}")
-    if not SAFE_SQL_REGEX.match(column_name):
-        raise ValueError(f"Invalid column name: {column_name}")
-    if not all(SAFE_SQL_REGEX.match(c) for c in column_names):
-        invalid = ",".join(column_names)
-        raise ValueError(f"Invalid column names: {invalid}")
+    validate_sql_params(table=table_name, column=column_name, column_names=column_names)
 
     if not isinstance(column_names, str):
         column_names = ", ".join(column_names)
@@ -243,10 +228,7 @@ def drop_column(table_or_name, column_name):
     else:
         table_name = table_or_name.name
 
-    if not SAFE_SQL_REGEX.match(table_name or ""):
-        raise ValueError(f"Invalid table name: {table_name}")
-    if not SAFE_SQL_REGEX.match(column_name or ""):
-        raise ValueError(f"Invalid column name: {column_name}")
+    validate_sql_params(table=table_name, column=column_name)
 
     drop_sql = f"ALTER TABLE {table_name} DROP COLUMN {column_name}"
 
@@ -282,13 +264,8 @@ def create_index(table_or_name, column_names, index_name=None, index_op=None):
     if isinstance(column_names, str):
         column_names = [c.strip() for c in column_names.split(",")]
 
-    if table is None:
-        raise ValueError(f"No table named {table_or_name}")
-    elif not column_names:
-        raise ValueError("No columns to index")
-    elif not all(col in table.columns for col in column_names):
-        raise ValueError(f"Invalid column names: {column_names}")
-    elif len(column_names) > 1 and (index_op or "").startswith("json"):
+    validate_columns_in(table, column_names, empty_table=table_or_name, message="Invalid index column names")
+    if len(column_names) > 1 and (index_op or "").startswith("json"):
         raise ValueError(f"Invalid index operation for multiple columns: {index_op}")
 
     if not index_name:
@@ -412,11 +389,9 @@ def create_foreign_key(table_or_name, column_name, related_column_or_name):
     else:
         related = related_column_or_name
 
-    if table is None:
-        raise ValueError(f"No table named {table_or_name}")
-    elif column_name not in table.columns:
-        raise ValueError(f"No column in table {table.name} named {column_name}")
-    elif related is None:
+    validate_columns_in(table, [column_name], empty_table=table_or_name)
+
+    if related is None:
         raise ValueError(f"No related column named {related_column_or_name}")
     else:
         col_name = f"{table.name}.{column_name}"
@@ -429,10 +404,8 @@ def create_foreign_key(table_or_name, column_name, related_column_or_name):
 
 def drop_foreign_key(table_or_name, fk_or_name):
 
-    tables = get_tables()
-
     if isinstance(table_or_name, str):
-        table = tables.get(table_or_name)
+        table = get_tables().get(table_or_name)
     else:
         table = table_or_name
 

@@ -9,7 +9,7 @@ from sqlalchemy.sql import sqltypes, and_, or_, func, FromClause, Insert, Select
 
 from .schema import get_engine, get_tables, get_table_count, table_exists, drop_table
 from .types import column_type_for, to_date_string, to_json_string
-from .validation import SAFE_SQL_REGEX, validate_columns
+from .validation import validate_columns_in, validate_sql_params, validate_table_name
 
 logger = logging.getLogger(__name__)
 
@@ -47,12 +47,7 @@ def query_json_keys(table_or_name, column_name, query, limit=None):
     else:
         table = table_or_name
 
-    # Validate required parameters
-
-    if not table_exists(table):
-        raise ValueError(f"No table named {table_or_name} to search")
-    if column_name not in table.columns:
-        raise ValueError(f"No such column: {column_name}")
+    validate_columns_in(table, [column_name], empty_table=table_or_name)
 
     json_op = table.columns[column_name].op("@>")
 
@@ -80,13 +75,10 @@ def query_tsvector_columns(table_or_name, column_names, query, limit=None):
     else:
         table = table_or_name
 
-    if not table_exists(table):
-        raise ValueError(f"No table named {table_or_name} to search")
-
     if isinstance(column_names, str):
         column_names = [c.strip() for c in column_names.split(",")]
 
-    validate_columns(table, column_names)
+    validate_columns_in(table, column_names, empty_table=table_or_name)
 
     search_condition = func.to_tsvector(text("||' '||".join(column_names), postgresql.TSVECTOR)).match(
         # Triple quotes required since `plainto_tsquery` cannot be directly invoked via sqlalchemy
@@ -98,8 +90,13 @@ def query_tsvector_columns(table_or_name, column_names, query, limit=None):
         f"'''{query}'''",
         postgresql_regconfig="english",
     )
+    search_query = Select(table.columns).distinct().where(search_condition)
 
-    return _query_limited(Select(table.columns).where(search_condition), limit)
+    if limit is not None:
+        search_query = search_query.limit(int(limit))
+
+    with get_engine().connect() as conn:
+        return list(conn.execute(search_query).fetchall())
 
 
 def update_from(table_name, into_table_name, join_columns, target_columns=None):
@@ -116,29 +113,26 @@ def update_from(table_name, into_table_name, join_columns, target_columns=None):
     from_table = both_tables.get(table_name)
     into_table = both_tables.get(into_table_name)
 
-    # Validate required parameters
-
-    if not table_exists(from_table):
-        raise ValueError(f"No table named {table_name} to update from")
-    if not table_exists(into_table):
-        raise ValueError(f"No table named {into_table_name} to update")
-    if not join_columns:
-        raise ValueError("No columns specified to join tables")
-
-    # Validate parameters for joining tables
-
-    from_cols = from_table.columns
-    into_cols = into_table.columns
-
     if isinstance(join_columns, str):
         join_columns = [c.strip() for c in join_columns.split(",")]
 
-    validate_columns(from_table, join_columns, f"Join columns missing in source table {table_name}")
-    validate_columns(into_table, join_columns, f"Join columns missing in target table {into_table_name}")
+    validate_columns_in(
+        from_table, join_columns,
+        empty_table=table_name,
+        message=f"Join columns missing in source table {table_name}"
+    )
+    validate_columns_in(
+        into_table, join_columns,
+        empty_table=into_table_name,
+        message=f"Join columns missing in target table {into_table_name}"
+    )
 
     # Prepare column names with values to be updated
 
     log_message = f"update_from: updating {into_table_name}"
+
+    from_cols = from_table.columns
+    into_cols = into_table.columns
 
     if isinstance(target_columns, str):
         target_columns = target_columns.split(",")
@@ -196,29 +190,27 @@ def update_rows(table_name, join_columns, target_columns, update_row, batch_size
 
     table = get_tables().get(table_name)
 
-    # Validate required parameters
-
-    if not table_exists(table):
-        raise ValueError(f"No table named {table_name} to update")
-    if not join_columns:
-        raise ValueError("No columns specified for join")
-    if not target_columns:
-        raise ValueError("No columns specified for update")
-    if not callable(update_row) or isinstance(update_row, type):
-        invalid = getattr(update_row, "__name__", "None")
-        raise ValueError(f"Invalid update function: {invalid}")
-    if not batch_size:
-        raise ValueError(f"Invalid batch size: {batch_size}")
-
-    # Validate parameters for joining and populating table
-
     if isinstance(join_columns, str):
         join_columns = [c.strip() for c in join_columns.split(",")]
     if isinstance(target_columns, str):
         target_columns = target_columns.split(",")
 
-    validate_columns(table, join_columns, "Join columns missing in source table")
-    validate_columns(table, target_columns, "Target columns missing in source table")
+    validate_columns_in(
+        table, join_columns,
+        empty_table=table_name,
+        message=f"Join columns missing in {table_name}"
+    )
+    validate_columns_in(
+        table, target_columns,
+        empty_table=table_name,
+        message=f"Target columns missing in {table_name}"
+    )
+
+    if not callable(update_row) or isinstance(update_row, type):
+        invalid = getattr(update_row, "__name__", "None")
+        raise ValueError(f"Invalid update function: {invalid}")
+    if not batch_size:
+        raise ValueError(f"Invalid batch size: {batch_size}")
 
     # Prepare query with specified columns and filtering
 
@@ -231,6 +223,10 @@ def update_rows(table_name, join_columns, target_columns, update_row, batch_size
     table_count = get_table_count(table)
     batch_size = table_count if batch_size < 0 else batch_size
 
+    if table_count == 0:
+        logger.info(f"update_rows:\tno rows to update")
+        return
+
     tmp_table_name = f"tmp_{table_name}"
 
     try:
@@ -238,6 +234,7 @@ def update_rows(table_name, join_columns, target_columns, update_row, batch_size
             logger.info(f"update_rows: updating {table_name} with modified values in batches of {batch_size}\n")
 
             select_query = conn.execute(Select(data_cols).execution_options(stream_results=True))
+            table_created = False
 
             for offset in range(0, table_count, batch_size):
                 done_count = min(table_count, (offset + batch_size))
@@ -248,14 +245,17 @@ def update_rows(table_name, join_columns, target_columns, update_row, batch_size
                 updated_rows = (update_row(r) for r in select_query.fetchmany(batch_size))
                 rows_to_send = [row for row in updated_rows if row is not None]
 
-                if offset == 0:
-                    select_into(tmp_table_name, rows_to_send, column_names, col_types, inspect=False)
-                else:
+                if not rows_to_send:
+                    continue
+                elif table_created:
                     insert_into(tmp_table_name, rows_to_send, column_names, inspect=False)
+                else:
+                    select_into(tmp_table_name, rows_to_send, column_names, col_types, inspect=False)
+                    table_created = True
 
                 logger.info(f"update_rows:\tprocessed {done_count} of {table_count} rows\n")
 
-        update_count = get_table_count(tmp_table_name)
+        update_count = get_table_count(tmp_table_name) if table_created else 0
 
         if not update_count:
             logger.info(f"update_rows:\tno rows to update")
@@ -285,31 +285,36 @@ def insert_from(table_name, into_table_name, column_names=None, join_columns=Non
     from_table = both_tables.get(table_name)
     into_table = both_tables.get(into_table_name)
 
-    # Validate table name parameters
+    validate_table_name(from_table, table_name)
 
-    if not table_exists(from_table):
-        raise ValueError(f"No table named {table_name} to select from")
     if not table_exists(into_table):
-        if create_if_not_exists:
-            return select_from(table_name, into_table_name, column_names)
-        else:
+        if not create_if_not_exists:
             raise ValueError(f"No table named {into_table_name} to insert into")
+        return select_from(table_name, into_table_name, column_names)
 
     # Validate parameters for excluding unique records
-
-    from_cols = from_table.columns
-    into_cols = into_table.columns
 
     if isinstance(join_columns, str):
         join_columns = [c.strip() for c in join_columns.split(",")]
 
     if join_columns:
-        validate_columns(from_table, join_columns, "Join columns missing in source table")
-        validate_columns(into_table, join_columns, "Join columns missing in target table")
+        validate_columns_in(
+            from_table, join_columns,
+            empty_table=table_name,
+            message=f"Join columns missing in source table {table_name}"
+        )
+        validate_columns_in(
+            into_table, join_columns,
+            empty_table=into_table_name,
+            message=f"Join columns missing in target table {into_table_name}"
+        )
 
     # Prepare column names to be inserted
 
     log_message = f"insert_from: populating {into_table_name} from {table_name}"
+
+    from_cols = from_table.columns
+    into_cols = into_table.columns
 
     if isinstance(column_names, str):
         column_names = column_names.split(",")
@@ -367,20 +372,19 @@ def insert_into(table_name, values, column_names, create_if_not_exists=False, in
     into_table = get_tables().get(table_name)
 
     if not table_exists(into_table):
-        if create_if_not_exists:
-            return select_into(table_name, values, column_names, inspect=inspect)
-        else:
+        if not create_if_not_exists:
             raise ValueError(f"No table named {table_name} to insert into")
+        return select_into(table_name, values, column_names, inspect=inspect)
+
+    if isinstance(column_names, str):
+        column_names = column_names.split(",")
+
+    validate_columns_in(into_table, column_names, empty_table=table_name)
 
     val_length = len(values)
     if not val_length:
         logger.warning(f"insert_into: no values to insert")
         return
-
-    if isinstance(column_names, str):
-        column_names = column_names.split(",")
-
-    validate_columns(into_table, column_names)
 
     row_length = len(column_names)
     if inspect and not all(row_length == len(val) for val in values):
@@ -410,8 +414,7 @@ def select_from(table_name, into_table_name, column_names=None):
 
     from_table = get_tables().get(table_name)
 
-    if not (table_exists(from_table)):
-        raise ValueError(f"No table named {table_name} to select from")
+    validate_table_name(from_table, table_name)
     if table_exists(into_table_name):
         raise ValueError(f"Table {into_table_name} already exists")
 
@@ -470,14 +473,10 @@ def select_into(table_name, values, column_names, column_types=None, inspect=Tru
     if column_types and isinstance(column_types, str):
         column_types = column_types.split(",")
 
-    row_length = len(column_names)
+    validate_sql_params(column_names=column_names, empty_message="No columns to select")
 
-    if not column_names:
-        raise ValueError("No columns to select")
-    elif not all(SAFE_SQL_REGEX.match(c) for c in column_names):
-        invalid = ",".join(column_names)
-        raise ValueError(f"Invalid column names: {invalid}")
-    elif column_types and row_length != len(column_types):
+    row_length = len(column_names)
+    if column_types and row_length != len(column_types):
         raise ValueError(f"Column types provided do not match columns: {column_types}")
     elif inspect and not all(row_length == len(val) for val in values):
         raise ValueError(f"Values provided do not match columns: {column_names}")

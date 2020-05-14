@@ -1,3 +1,4 @@
+import copy
 import datetime
 import decimal
 import json
@@ -377,14 +378,18 @@ def test_create_index(db_metadata):
     table_name = SITE_TABLE_NAME
     test_table = db_metadata.tables[table_name]
 
+    inject_sql = "DROP USER 'postgres' IF EXISTS"
+
     # Test with invalid parameters
 
     with pytest.raises(ValueError, match="No table named"):
         create_index("nope", "site_addr")
-    with pytest.raises(ValueError, match="No columns to index"):
+    with pytest.raises(ValueError, match="Invalid index column names"):
         create_index(table_name, [])
-    with pytest.raises(ValueError, match="Invalid column names"):
+    with pytest.raises(ValueError, match="Invalid index column names"):
         create_index(table_name, ["site_addr", "nope"])
+    with pytest.raises(ValueError, match="Invalid index column names"):
+        create_index(table_name, ["site_addr", inject_sql])
     with pytest.raises(ValueError, match="Invalid index operation for multiple columns"):
         create_index(table_name, "test_json,test_none", None, "json_full")
     with pytest.raises(ValueError, match="Invalid index operation for multiple columns"):
@@ -430,10 +435,17 @@ def test_drop_index(db_metadata):
 
     # Test with invalid parameters
 
+    # Should raise no errors
+    drop_index("nope", column_names="site_addr", ignore_errors=True)
+    drop_index(table_name, ignore_errors=True)
+    drop_index(table_name, index_name="nope", ignore_errors=True)
+
     with pytest.raises(ValueError, match="No table named"):
         drop_index("nope", column_names="site_addr", ignore_errors=False)
     with pytest.raises(ValueError, match="No index name provided"):
         drop_index(table_name, ignore_errors=False)
+    with pytest.raises(Exception):
+        drop_index(table_name, index_name="nope", ignore_errors=False)
 
     # Test removing APN index created during setup
     index_name = "order_index"
@@ -444,6 +456,20 @@ def test_drop_index(db_metadata):
     index_name = "tsvector_index"
     drop_index(table_name, index_name, ignore_errors=False)
     assert_index(db_metadata, table_name, index_name=index_name, exists=False)
+
+    # Test removing indexes by column name
+
+    pk_index = f"{table_name}_obj_index_obj_hash_idx"
+
+    Index(pk_index, "pk", unique=True, _table=test_table).create()
+    assert_index(db_metadata, table_name, index_name=pk_index)
+    drop_index(table_name, column_names="obj_index,obj_hash", ignore_errors=False)
+    assert_index(db_metadata, table_name, index_name=pk_index, exists=False)
+
+    Index(pk_index, "pk", unique=True, _table=test_table).create()
+    assert_index(db_metadata, table_name, index_name=pk_index)
+    drop_index(table_name, column_names=["obj_index", "obj_hash"], ignore_errors=False)
+    assert_index(db_metadata, table_name, index_name=pk_index, exists=False)
 
 
 def test_has_index(db_metadata):
@@ -470,23 +496,31 @@ def test_create_table(db_metadata):
 
     # Test with invalid parameters
 
-    with pytest.raises(ValueError, match="Invalid table name"):
-        create_table(None, column_one="string")
+    tmp_table_name = ALL_TEST_TABLES[2]
+
+    # Test invalid table names
+    with pytest.raises(ValueError, match="No table name specified"):
+        create_table(None, col="string")
     with pytest.raises(ValueError, match="Invalid table name"):
         create_table(inject_sql, column_one="string")
     with pytest.raises(ValueError, match="Table already exists"):
         create_table(table_name, drop_first=False, **SITE_COL_TYPES)
-    with pytest.raises(ValueError, match="No columns specified"):
+    # Test invalid index columns
+    with pytest.raises(ValueError, match="No column names specified"):
         create_table("no_columns")
+    with pytest.raises(ValueError, match="Invalid index column names"):
+        create_table(tmp_table_name, index_cols="col,nope", col="string", drop_first=True)
+    with pytest.raises(ValueError, match="Invalid index column names"):
+        create_table(tmp_table_name, index_cols=["col", "nope"], col="string", drop_first=True)
+    with pytest.raises(ValueError, match="Invalid index column names"):
+        create_table(tmp_table_name, index_cols={"col": "unique", "nope": "unique"}, col="string", drop_first=True)
 
     # Test with string of index columns
-
-    db_metadata.tables[table_name].drop()
 
     create_table(
         table_name,
         index_cols="pk,obj_order",
-        drop_first=False,
+        drop_first=True,
         **SITE_COL_TYPES
     )
     assert_table(db_metadata, table_name, SITE_COL_TYPES)
@@ -500,7 +534,7 @@ def test_create_table(db_metadata):
         table_name,
         index_cols=["pk", "obj_order"],
         drop_first=False,
-        **SITE_COL_TYPES
+        **{k: v.__name__ for k, v in SITE_COL_TYPES.items()}
     )
     assert_table(db_metadata, table_name, SITE_COL_TYPES)
     assert_index(db_metadata, table_name, index_name=f"{table_name}_pk_idx")
@@ -514,7 +548,7 @@ def test_create_table(db_metadata):
         table_name,
         index_cols={"pk": "unique", "obj_order": "unique", "pk,obj_order": "unique"},
         drop_first=False,
-        **SITE_COL_TYPES
+        **{k: v() for k, v in SITE_COL_TYPES.items()}
     )
     assert_table(db_metadata, table_name, SITE_COL_TYPES)
     assert_index(db_metadata, table_name, index_name=f"{table_name}_pk_idx")
@@ -524,8 +558,14 @@ def test_create_table(db_metadata):
 
 def test_drop_table(db_metadata):
 
+    site_table = db_metadata.tables[SITE_TABLE_NAME]
+
     drop_table(SITE_TABLE_NAME)
     assert SITE_TABLE_NAME not in refresh_metadata(db_metadata).tables
+
+    # Should raise no errors
+    drop_table(site_table)
+    drop_table(site_table.name)
 
 
 def test_get_table(db_metadata):
@@ -575,9 +615,9 @@ def test_insert_from(db_metadata):
 
     # Test with invalid parameters
 
-    with pytest.raises(ValueError, match="No table named.*to select from"):
+    with pytest.raises(ValueError, match="No table named"):
         insert_from("nope", SITE_TABLE_NAME, "*")
-    with pytest.raises(ValueError, match="No table named.*to insert into"):
+    with pytest.raises(ValueError, match="No table named"):
         insert_from(from_table_name, "nope", "*")
     with pytest.raises(ValueError, match="Join columns missing in.*table"):
         insert_from(from_table_name, SITE_TABLE_NAME, "*", join_columns="nope")
@@ -634,7 +674,7 @@ def test_insert_into(db_metadata):
 
     make_table(db_metadata, into_table_name, target_cols)
 
-    with pytest.raises(ValueError, match="No table named.*to insert into"):
+    with pytest.raises(ValueError, match="No table named"):
         insert_into("nope", [("one",), ("two",), ("three",)], "str")
     with pytest.raises(ValueError, match="Invalid column names"):
         insert_into(into_table_name, [("one",), ("two",), ("three",)], "no,nope,wrong")
@@ -691,7 +731,7 @@ def test_select_from(db_metadata):
 
     # Test with invalid parameters
 
-    with pytest.raises(ValueError, match="No table named.*to select from"):
+    with pytest.raises(ValueError, match="No table named"):
         select_from("nope", into_table_name, "*")
     with pytest.raises(ValueError, match="Table.*already exists"):
         select_from(from_table_name, SITE_TABLE_NAME, "*")
@@ -726,6 +766,8 @@ def test_select_into(db_metadata):
 
     with pytest.raises(ValueError, match="Table.*already exists"):
         select_into(SITE_TABLE_NAME, [("one",), ("two",), ("three",)], "val")
+    with pytest.raises(ValueError, match="No columns to select"):
+        select_into(into_table_name, [("one",), ("two",), ("three",)], "")
     with pytest.raises(ValueError, match="Invalid column names"):
         select_into(into_table_name, [("one",), ("two",), ("three",)], inject_sql)
     with pytest.raises(ValueError, match="Column types provided do not match columns"):
@@ -765,7 +807,7 @@ def test_select_into(db_metadata):
 
     # Test insert with no types specified (
 
-    select_into(into_table_name, insert_vals, target_cols)
+    select_into(into_table_name, insert_vals, ",".join(target_cols))
     assert_table(db_metadata, into_table_name, target_cols)
     assert_records(db_metadata, into_table_name, target_data, target_cols)
 
@@ -793,13 +835,13 @@ def test_update_from(db_metadata):
 
     # Test with invalid parameters
 
-    with pytest.raises(ValueError, match="No table named.*to update from"):
+    with pytest.raises(ValueError, match="No table named"):
         update_from("nope", SITE_TABLE_NAME, "pk")
-    with pytest.raises(ValueError, match="No table named.*to update"):
+    with pytest.raises(ValueError, match="No table named"):
         update_from(from_table_name, "nope", "pk")
-    with pytest.raises(ValueError, match="No columns specified to join tables"):
+    with pytest.raises(ValueError, match="Join columns missing"):
         update_from(from_table_name, SITE_TABLE_NAME, "")
-    with pytest.raises(ValueError, match="Join columns missing in.*table"):
+    with pytest.raises(ValueError, match="Join columns missing"):
         update_from(from_table_name, SITE_TABLE_NAME, ["site_addr", "nope"])
 
     # Create and populate a table with mangled data for testing updates
@@ -821,7 +863,7 @@ def test_update_from(db_metadata):
     assert_records(db_metadata, into_table_name, test_data)
 
     # Test that all records are updated by join on target columns
-    update_from(from_table_name, into_table_name, join_cols)
+    update_from(from_table_name, into_table_name, ",".join(join_cols))
     assert_records(db_metadata, into_table_name, orig_data)
 
     # Reset the updated table to mangled values for next test
@@ -844,41 +886,63 @@ def test_update_from(db_metadata):
 
 def test_update_rows(db_metadata):
 
-    test_table_name = ALL_TEST_TABLES[1]
-
-    def update_row(row):
+    def update_zips(row):
         """
         Add integer zip to new column and json
         Row: pk, site_zip, size_zip_num, site_json
         """
-
         row = list(row)
-        row[3]['zip'] = row[2] = int(row[1])
-
+        row[3]["zip"] = row[2] = int(row[1])
         return row
+
+    def update_some(row):
+        """
+        Add "changed" key to JSON depending on address
+        Row: pk, site_zip, size_zip_num, site_json
+        """
+        row = list(row)
+
+        if row[3]["number"] != "7350":
+            row = None
+        else:
+            row[3]["changed"] = True
+        return row
+
+    def update_none(row):
+        return None
+
+    test_table_name = ALL_TEST_TABLES[1]
+    empty_table_name = ALL_TEST_TABLES[2]
 
     # Test with invalid parameters
 
-    with pytest.raises(ValueError, match="No table named.*to update"):
-        update_rows("nope", "pk", "site_addr", update_row)
-    with pytest.raises(ValueError, match="No columns specified for join"):
-        update_rows(SITE_TABLE_NAME, "", "site_addr", update_row)
-    with pytest.raises(ValueError, match="No columns specified for update"):
-        update_rows(SITE_TABLE_NAME, "pk", "", update_row)
+    with pytest.raises(ValueError, match="No table named"):
+        update_rows("nope", "pk", "site_addr", update_zips)
+    with pytest.raises(ValueError, match="Join columns missing"):
+        update_rows(SITE_TABLE_NAME, "", "site_addr", update_zips)
+    with pytest.raises(ValueError, match="Target columns missing"):
+        update_rows(SITE_TABLE_NAME, "pk", "", update_zips)
     with pytest.raises(ValueError, match="Invalid update function"):
         update_rows(SITE_TABLE_NAME, "pk", "site_addr", None, 0)
     with pytest.raises(ValueError, match="Invalid batch size"):
-        update_rows(SITE_TABLE_NAME, "pk", "site_addr", update_row, 0)
+        update_rows(SITE_TABLE_NAME, "pk", "site_addr", update_zips, 0)
 
     with pytest.raises(ValueError, match="Join columns missing in.*table"):
-        update_rows(SITE_TABLE_NAME, "pk,nope", "site_addr", update_row)
+        update_rows(SITE_TABLE_NAME, "pk,nope", "site_addr", update_zips)
     with pytest.raises(ValueError, match="Target columns missing in.*table"):
-        update_rows(SITE_TABLE_NAME, "pk", ["site_addr", "nope"], update_row)
+        update_rows(SITE_TABLE_NAME, "pk", ["site_addr", "nope"], update_zips)
 
     target_cols = ("site_zip", "site_zip_num", "site_json")
 
+    # Test when there are no rows to update
+
+    make_table(db_metadata, empty_table_name, SITE_TABLE_COLS)
+    update_rows(empty_table_name, "pk", SITE_TABLE_COLS, update_zips)
+
+    # Prepare a fully populated table
+
     # Insert test table columns in undefined order via `set`
-    test_cols = set(SITE_TABLE_COLS).union(target_cols)
+    test_cols = list(set(SITE_TABLE_COLS).union(target_cols))[::-1]
     test_data = dict(SITE_DATA_DICT)
     # New table will have new column with numeric zip
     test_types = dict(SITE_COL_TYPES)
@@ -889,20 +953,42 @@ def test_update_rows(db_metadata):
     assert_table(db_metadata, test_table_name, test_cols)
     assert_records(db_metadata, test_table_name, test_data)
 
-    # Test updating rows in data table
-    update_rows(test_table_name, "pk", target_cols, update_row, batch_size=3)
+    # Test updating all the rows in data table
 
-    # Test that the data has been updated
+    update_rows(test_table_name, "pk", target_cols, update_zips, batch_size=3)
 
-    target_data = dict(test_data)
-    for record in target_data.values():
+    target_data = {}
+    for pk, record in copy.deepcopy(test_data).items():
         parsed = int(record["site_zip"])
         record["site_zip_num"] = parsed
         record["site_json"]["zip"] = parsed
+        target_data[pk] = record
 
     assert_records(db_metadata, test_table_name, target_data, target_cols)
+    assert target_data != test_data
+    assert f"tmp_{test_table_name}" not in refresh_metadata(db_metadata).tables
 
-    # Test that the temporary table was deleted after update
+    # Test updating some the rows depending on address
+
+    update_rows(test_table_name, "pk", target_cols, update_some, batch_size=3)
+
+    test_data = target_data
+    target_data = {}
+
+    for pk, record in copy.deepcopy(test_data).items():
+        if record["site_json"]["number"] == "7350":
+            record["site_json"]["changed"] = True
+        target_data[record["pk"]] = record
+
+    assert_records(db_metadata, test_table_name, target_data, target_cols)
+    assert target_data != test_data
+    assert f"tmp_{test_table_name}" not in refresh_metadata(db_metadata).tables
+
+    # Test updating none of the rows in the data table
+
+    update_rows(test_table_name, "pk", target_cols, update_none, batch_size=3)
+
+    assert_records(db_metadata, test_table_name, target_data, target_cols)
     assert f"tmp_{test_table_name}" not in refresh_metadata(db_metadata).tables
 
 
@@ -928,7 +1014,7 @@ def test_create_foreign_key(db_metadata):
 
     with pytest.raises(ValueError, match="No table named"):
         create_foreign_key("nope", "pk", f"{site_table.name}.obj_order")
-    with pytest.raises(ValueError, match="No column in table"):
+    with pytest.raises(ValueError, match="Invalid column names"):
         create_foreign_key(site_table.name, "nope", f"{site_table.name}.obj_order")
     with pytest.raises(ValueError, match="No related column named"):
         create_foreign_key(site_table.name, "pk", f"{site_table.name}.nope")
@@ -1039,7 +1125,7 @@ def test_alter_column_type(db_metadata):
         alter_column_type(inject_sql, "test_bool", "int")
     with pytest.raises(ValueError, match="Invalid column name"):
         alter_column_type(table_name, inject_sql, "int")
-    with pytest.raises(ValueError, match="Invalid SQL type"):
+    with pytest.raises(ValueError, match="Invalid column type"):
         alter_column_type(table_name, "test_bool", inject_sql)
 
     # PK column tests
@@ -1178,6 +1264,51 @@ def test_create_tsvector_column(db_metadata):
         create_tsvector_column(site_table.name, "searchable", ["obj_hash", inject_sql], "tsvector_index")
 
 
+def test_query_json_keys(db_metadata):
+
+    site_table = db_metadata.tables[SITE_TABLE_NAME]
+
+    # Test with invalid parameters
+
+    with pytest.raises(ValueError, match="No table named"):
+        query_json_keys("nope", "site_addr", {"state": "NY"})
+    with pytest.raises(ValueError, match="Invalid column name"):
+        query_json_keys(SITE_TABLE_NAME, "nope", {"state": "NY"})
+
+    # Test a query that will return all columns for all records
+    limit = len(SITE_TEST_DATA)
+    search_results = query_json_keys(site_table, "site_json", {"city": "ALBANY", "state": "NY"})
+    assert limit == len(search_results)
+    assert all(len(result) == len(SITE_TABLE_COLS) for result in search_results)
+
+    # Test limiting a query that will return all columns for all records
+    limit = round(len(SITE_TEST_DATA) / 2)
+    search_results = query_json_keys(site_table, "site_json", {"city": "ALBANY", "state": "NY"}, limit=limit)
+    assert limit == len(search_results)
+    assert all(len(result) == len(SITE_TABLE_COLS) for result in search_results)
+
+    # Test an excessive limit on a query that will return all columns for all records
+    limit = len(SITE_TEST_DATA) * 2
+    search_results = query_json_keys(site_table, "site_json", {"city": "ALBANY", "state": "NY"}, limit=limit)
+    assert limit == len(search_results)
+    assert all(len(result) == len(SITE_TABLE_COLS) for result in search_results)
+
+    # Test a single matching address as string
+    query, matches = json.dumps({"number": "7550", "street": "STATE ST STE CML5"}), 1
+    search_results = query_json_keys(site_table.name, "site_json", query)
+    assert matches == len(search_results)
+
+    # Test an invalid address
+    query, matches = {"street": "nope"}, 0
+    search_results = query_json_keys(site_table.name, "site_json", query)
+    assert matches == len(search_results)
+
+    # Test an empty address
+    query, matches = '""', 0
+    search_results = query_json_keys(site_table.name, "site_json", query)
+    assert matches == len(search_results)
+
+
 def test_query_tsvector_columns(db_metadata):
 
     site_table = db_metadata.tables[SITE_TABLE_NAME]
@@ -1192,11 +1323,17 @@ def test_query_tsvector_columns(db_metadata):
     # Test queries that match all records
     limit = len(SITE_TEST_DATA)
     for query in ("ALBANY", "NY", "STATE", "12224"):
-        assert limit == len(query_tsvector_columns(site_table, SEARCHABLE_COLS, query))
+        assert limit == len(query_tsvector_columns(SITE_TABLE_NAME, SEARCHABLE_COLS, query))
 
     # Test that limit applies to queries matching all records
     for limit, query in enumerate(("ALBANY", "NY", "STATE", "12224")):
         assert limit == len(query_tsvector_columns(site_table, SEARCHABLE_COLS, query, limit=limit))
+
+    # Test an excessive limit on a query that matches all records
+    query, matches = "NY", len(SITE_TEST_DATA)
+    search_results = query_tsvector_columns(site_table.name, SEARCHABLE_COLS, query, limit=(matches * 2))
+    assert matches == len(search_results)
+    assert all(len(result) == len(SITE_TABLE_COLS) for result in search_results)
 
     # Test queries that match a single record
 
@@ -1239,48 +1376,4 @@ def test_query_tsvector_columns(db_metadata):
 
     query, matches = "0-0-7350-12224", 0
     search_results = query_tsvector_columns(site_table.name, "site_addr", query)
-    assert matches == len(search_results)
-
-
-def test_query_json_keys(db_metadata):
-
-    test_table_name = ALL_TEST_TABLES[1]
-
-    # Test with invalid parameters
-
-    with pytest.raises(ValueError, match="No table named"):
-        query_json_keys("nope", "site_addr", {"state": "NY"})
-    with pytest.raises(ValueError, match="No such column"):
-        query_json_keys(SITE_TABLE_NAME, "nope", {"state": "NY"})
-
-    # Prepare a table with upper cased text and appropriately parsed address data
-
-    test_data = {obj["pk"]: dict(obj) for obj in SITE_TEST_DATA}
-    test_table = make_table(db_metadata, test_table_name, SITE_TABLE_COLS, data=test_data)
-
-    # Test a query that will return all columns for all records
-    limit = len(test_data)
-    search_results = query_json_keys(test_table, "site_json", {"city": "ALBANY", "state": "NY"})
-    assert limit == len(search_results)
-    assert all(len(result) == len(SITE_TABLE_COLS) for result in search_results)
-
-    # Test limiting a query that will return all columns for all records
-    limit = round(len(test_data) / 2)
-    search_results = query_json_keys(test_table, "site_json", {"city": "ALBANY", "state": "NY"}, limit=limit)
-    assert limit == len(search_results)
-    assert all(len(result) == len(SITE_TABLE_COLS) for result in search_results)
-
-    # Test a single matching address as string
-    query, matches = json.dumps({"number": "7550", "street": "STATE ST STE CML5"}), 1
-    search_results = query_json_keys(test_table.name, "site_json", query)
-    assert matches == len(search_results)
-
-    # Test an invalid address
-    query, matches = {"street": "nope"}, 0
-    search_results = query_json_keys(test_table.name, "site_json", query)
-    assert matches == len(search_results)
-
-    # Test an empty address
-    query, matches = '""', 0
-    search_results = query_json_keys(test_table.name, "site_json", query)
     assert matches == len(search_results)
