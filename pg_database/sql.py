@@ -35,7 +35,10 @@ def _query_limited(query, limit=None):
 def query_json_keys(table_or_name, column_name, query, limit=None):
     """
     Queries a JSON column matching keys: performs best with a `jsonb_path_ops` index:
-        create_index(table_name, "json_col", index_op="json_path")
+        create_index("table1", "json_col", index_op="json_path")
+
+    Example SQL generated:
+        SELECT * FROM table1 WHERE table1.json_col @> '{"key1": "val1", ...}'
 
     :param table_or_name: a sqlalchemy table object or the name of a table to query
     :param column_name: the name of the (indexed) column with keys to query
@@ -62,8 +65,12 @@ def query_json_keys(table_or_name, column_name, query, limit=None):
 
 def query_tsvector_columns(table_or_name, column_names, query, limit=None):
     """
-    Queries one or more columns: performs best if all column names are indexed
-        create_index(table_name, "col1,col2", index_op="to_tsvector")
+    Performs a full text search on one or more columns: performs best if all column names are indexed
+        create_index("table1", "col1,col2", index_op="to_tsvector")
+
+    Example SQL generated:
+        SELECT DISTINCT * FROM table1
+        WHERE to_tsvector(col1||' '||col2||' '||...) @@ to_tsquery('english', '''query''')
 
     :param table_or_name: a sqlalchemy table object or the name of a table to query
     :param column_names: one or more comma-seperated tsvector-indexed column names
