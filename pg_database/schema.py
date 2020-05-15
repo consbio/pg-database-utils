@@ -25,18 +25,28 @@ def get_metadata():
 # Table utilities
 
 
-def get_table(name):
-    """ Auto-load a table schema from the database. Like `get_tables()`, but more efficient for a single table """
+def get_table(table_name):
+    """
+    Auto-load a table schema from the database
+    :param table_name: the name of the table to load
+    :return: an existing sqlalchemy table, or raise ValueError if table doesn't exist
+    """
 
     engine = get_engine()
 
     try:
-        return Table(name, MetaData(engine), autoload=True, autoload_with=engine)
+        return Table(table_name, MetaData(engine), autoload=True, autoload_with=engine)
     except exc.NoSuchTableError:
-        raise ValueError(f'No table named "{name}"')
+        raise ValueError(f'No table named "{table_name}"')
 
 
 def get_table_count(table_or_name):
+    """
+    Executes a count query against an existing table
+    :param table_or_name: a sqlalchemy table object or the name of a table to query
+    :return: the number of rows in the specified table, or raise ValueError if table doesn't exist
+    """
+
     if isinstance(table_or_name, str):
         table = get_table(table_or_name)
     else:
@@ -47,9 +57,9 @@ def get_table_count(table_or_name):
 
 def get_tables(table_names=None):
     """
-    A helper to pull in one or more sqlalchemy table objects from the database.
-    :param table_names: one or more comma-seperated table names, or a list of table names
-    :return: all of the CEQA tables in a dict-like object, or the specified subset in a dict
+    Queries one or more sqlalchemy table objects from the database if they exist.
+    :param table_names: optional comma-seperated column names, or a list of column names
+    :return: all existing tables in a dict-like object, or the specified subset in a dict
     """
 
     metadata = MetaData(get_engine())
@@ -66,6 +76,12 @@ def get_tables(table_names=None):
 
 
 def table_exists(table_or_name):
+    """
+    Determines if a table exists in the database
+    :param table_or_name: a sqlalchemy table object or the name of a table to query
+    :return: True if table exists, otherwise False
+    """
+
     if isinstance(table_or_name, str):
         table = get_tables().get(table_or_name)
     else:
@@ -74,7 +90,24 @@ def table_exists(table_or_name):
     return table is not None and table.exists
 
 
-def create_table(table_name, index_cols=None, drop_first=True, **column_types):
+def create_table(table_name, index_cols=None, dropfirst=True, **column_types):
+    """
+    Creates a table in the database according to specified parameters
+    :param table_name: the name of the table to create
+    :param index_cols: optional comma-seperated column names, or a list or dict of column names to index
+        * if index_cols is a list or string, the columns specified are indexed together:
+        * if index_cols is a dict:
+            - keys may be comma-separated lists of columns
+            - values are valid index ops (see create_index)
+            - comma-separated columns are indexed together
+    :param dropfirst: drop any existing table if True, otherwise raise a ValueError if table exists
+    :param column_types: a dict where keys represent columns and values are column types:
+        * values may be strings indicating a type
+        * values may also be classes defined in sqlalchemy.sql.sqltypes
+        * unrecognized types default to unicode text type
+        * see types.COLUMN_TYPE_MAP for string values that map to types
+    :return: the created table
+    """
 
     validate_sql_params(table=table_name, empty_message=f"No table name specified")
     validate_sql_params(
@@ -85,9 +118,9 @@ def create_table(table_name, index_cols=None, drop_first=True, **column_types):
     meta = get_metadata()
     exists = table_name in meta.tables
 
-    if exists and not drop_first:
+    if exists and not dropfirst:
         raise ValueError(f"Table already exists: {table_name}")
-    elif exists and drop_first:
+    elif exists and dropfirst:
         meta.tables[table_name].drop(checkfirst=True)
         meta = get_metadata()
 
@@ -112,6 +145,11 @@ def create_table(table_name, index_cols=None, drop_first=True, **column_types):
 
 
 def drop_table(table_or_name):
+    """
+    Drops a table if it exists in the database; if not a warning is logged
+    :param table_or_name: a sqlalchemy table object or the name of a table to drop
+    """
+
     if isinstance(table_or_name, str):
         table = get_tables().get(table_or_name)
     else:
@@ -128,6 +166,15 @@ def drop_table(table_or_name):
 
 
 def alter_column_type(table_or_name, column_name, new_type):
+    """
+    Alter a column existing in a given table
+    :param table_or_name: a sqlalchemy table object or the name of a table with a column to alter
+    :param column_name: the name of the column in the table to alter
+    :param new_type: indicates what type the column should be updated to:
+        * may be a string indicating the type
+        * may also be a class defined in sqlalchemy.sql.sqltypes
+        * see types.COLUMN_TYPE_MAP for string values that map to types
+    """
 
     if isinstance(table_or_name, str):
         table_name = table_or_name
@@ -151,6 +198,18 @@ def alter_column_type(table_or_name, column_name, new_type):
 
 
 def create_column(table_or_name, column_name, column_type, checkfirst=False, default=None, nullable=False):
+    """
+    Alter a column existing in a given table
+    :param table_or_name: a sqlalchemy table object or the name of a table on which to create a column
+    :param column_name: the name of the column to create
+    :param column_type: indicates what type the column should be:
+        * may be a string indicating the type
+        * may also be a class defined in sqlalchemy.sql.sqltypes
+        * see types.COLUMN_TYPE_MAP for string values that map to types
+    :param checkfirst: check if column exists if True, otherwise raise a sqlalchemy error if column exists
+    :param default: a default value to assign to the column
+    :param nullable: make the column support NULL if True, otherwise NOT NULL
+    """
 
     if isinstance(table_or_name, str):
         table_name = table_or_name
@@ -221,7 +280,13 @@ def create_tsvector_column(table_or_name, column_name, column_names, index_name)
     create_index(table_or_name, column_names, index_name, "to_tsvector")
 
 
-def drop_column(table_or_name, column_name):
+def drop_column(table_or_name, column_name, checkfirst=False):
+    """
+    Execute SQL to drop a column
+    :param table_or_name: a sqlalchemy table object or the name of a table on which to create a column
+    :param column_name: the name of the column to drop
+    :param checkfirst: check if column exists if True, otherwise raise a sqlalchemy error if it doesn't
+    """
 
     if isinstance(table_or_name, str):
         table_name = table_or_name
@@ -230,7 +295,10 @@ def drop_column(table_or_name, column_name):
 
     validate_sql_params(table=table_name, column=column_name)
 
-    drop_sql = f"ALTER TABLE {table_name} DROP COLUMN {column_name}"
+    if checkfirst:
+        drop_sql = f"ALTER TABLE {table_name} DROP COLUMN IF EXISTS {column_name}"
+    else:
+        drop_sql = f"ALTER TABLE {table_name} DROP COLUMN {column_name}"
 
     logger.info(f"drop_column: dropping {table_name}.{column_name}")
 
@@ -251,9 +319,13 @@ def create_index(table_or_name, column_names, index_name=None, index_op=None):
         It may be necessary to override the index name to ensure it is under 63 characters;
         otherwise, index creation will fail with an error from PostgreSQL.
         A conventional index name will follow this pattern: "{table_name}_{column_names}_idx"
-    :param index_op: any SQL function available in Postgresql, that is defined in sqlalchemy.sql.func.*
-        Only "coalesce" and "to_tsvector" are directly supported.
-        Otherwise, we assume the specified function takes the provided column names as parameters.
+    :param index_op: any SQL function available in Postgresql (using sqlalchemy.sql.func.*):
+        * supported index types are:
+            - coalesce:    CREATE INDEX <idx> ON <table> COALESCE(<col1>,<col2>,'');
+            - json_full:   CREATE INDEX <idx> ON <table> USING GIN (<col>);
+            - json_path:   CREATE INDEX <idx> ON <table> USING GIN (<col> jsonb_path_ops);
+            - to_tsvector: CREATE INDEX <idx> ON <table> USING GIN(to_tsvector('english', <col1>||' '||<col2>));
+            - unique:      CREATE UNIQUE INDEX <idx> ON <table> (<col1>,<col2>);
     """
 
     if isinstance(table_or_name, str):
@@ -294,8 +366,7 @@ def create_index(table_or_name, column_names, index_name=None, index_op=None):
         index_kwargs["unique"] = True
         expressions = [col for col in column_names if col in table.columns]
     else:
-        # Try the operation on all columns and let sqlalchemy determine the error
-        expressions = (getattr(func, index_op)(*column_names),)
+        raise ValueError(f"Unsupported index type: {index_op}")
 
     logger.info(f"create_index: creating index {index_name} on {table.name}")
     Index(index_name, *expressions, **index_kwargs).create()
@@ -306,8 +377,8 @@ def drop_index(table_or_name, index_name=None, column_names=None, ignore_errors=
     Drops a database index by name for a specified table if it exists
 
     :param table_or_name: a sqlalchemy table object or the name of a table
-    :param index_name: optionally specify an index name to drop
-    :param column_names: optionally derive index name from a list or string of comma-seperated column names
+    :param index_name: EITHER specify an index name to drop
+    :param column_names: OR derive index name from a list or string of comma-seperated column names
     :param ignore_errors: if True, will log warning for database errors; otherwise will raise them
 
     If both index_name and column_names are provided, index_name takes precedence
@@ -375,6 +446,14 @@ def has_index(table_or_name, index_name):
 
 
 def create_foreign_key(table_or_name, column_name, related_column_or_name):
+    """
+    Creates a foreign key on the specified table given two column names
+
+    :param table_or_name: a sqlalchemy table object or the name of a table referencing another one
+    :param column_name: the name of the column in the referencing table
+    :param related_column_or_name: the name of the column in a referenced table
+        * this value must be a string including the table name: 'other_table.col_to_reference'
+    """
 
     tables = get_tables()
 
@@ -403,6 +482,12 @@ def create_foreign_key(table_or_name, column_name, related_column_or_name):
 
 
 def drop_foreign_key(table_or_name, fk_or_name):
+    """
+    Drops a foreign key for a specified table if it exists
+
+    :param table_or_name: a sqlalchemy table object or the name of a table
+    :param fk_or_name: a sqlalchemy foreign key constraint, or the name of one
+    """
 
     if isinstance(table_or_name, str):
         table = get_tables().get(table_or_name)

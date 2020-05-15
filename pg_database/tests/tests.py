@@ -599,6 +599,8 @@ def test_create_index(db_metadata):
         create_index(table_name, "test_json,test_none", None, "json_full")
     with pytest.raises(ValueError, match="Invalid index operation for multiple columns"):
         create_index(table_name, "test_json,test_none", None, "json_path")
+    with pytest.raises(ValueError, match="Unsupported index type"):
+        create_index(table_name, "site_addr", None, "nope")
 
     # Test default index creation
     column_name = "site_addr"
@@ -709,23 +711,23 @@ def test_create_table(db_metadata):
     with pytest.raises(ValueError, match="Invalid table name"):
         create_table(inject_sql, column_one="string")
     with pytest.raises(ValueError, match="Table already exists"):
-        create_table(table_name, drop_first=False, **SITE_COL_TYPES)
+        create_table(table_name, dropfirst=False, **SITE_COL_TYPES)
     # Test invalid index columns
     with pytest.raises(ValueError, match="No column names specified"):
         create_table("no_columns")
     with pytest.raises(ValueError, match="Invalid index column names"):
-        create_table(tmp_table_name, index_cols="col,nope", col="string", drop_first=True)
+        create_table(tmp_table_name, index_cols="col,nope", col="string", dropfirst=True)
     with pytest.raises(ValueError, match="Invalid index column names"):
-        create_table(tmp_table_name, index_cols=["col", "nope"], col="string", drop_first=True)
+        create_table(tmp_table_name, index_cols=["col", "nope"], col="string", dropfirst=True)
     with pytest.raises(ValueError, match="Invalid index column names"):
-        create_table(tmp_table_name, index_cols={"col": "unique", "nope": "unique"}, col="string", drop_first=True)
+        create_table(tmp_table_name, index_cols={"col": "unique", "nope": "unique"}, col="string", dropfirst=True)
 
     # Test with string of index columns
 
     create_table(
         table_name,
         index_cols="pk,obj_order",
-        drop_first=True,
+        dropfirst=True,
         **SITE_COL_TYPES
     )
     assert_table(db_metadata, table_name, SITE_COL_TYPES)
@@ -738,7 +740,7 @@ def test_create_table(db_metadata):
     create_table(
         table_name,
         index_cols=["pk", "obj_order"],
-        drop_first=False,
+        dropfirst=False,
         **{k: v.__name__ for k, v in SITE_COL_TYPES.items()}
     )
     assert_table(db_metadata, table_name, SITE_COL_TYPES)
@@ -752,7 +754,7 @@ def test_create_table(db_metadata):
     create_table(
         table_name,
         index_cols={"pk": "unique", "obj_order": "unique", "pk,obj_order": "unique"},
-        drop_first=False,
+        dropfirst=False,
         **{k: v() for k, v in SITE_COL_TYPES.items()}
     )
     assert_table(db_metadata, table_name, SITE_COL_TYPES)
@@ -1438,6 +1440,13 @@ def test_drop_column(db_metadata):
         drop_column(inject_sql, "test_bool")
     with pytest.raises(ValueError, match="Invalid column name"):
         drop_column(site_table.name, inject_sql)
+
+    # Test when the column doesn't exist
+
+    column = "nope"
+    assert column not in site_table.columns
+    drop_column(site_table.name, column, checkfirst=True)
+    assert column not in refresh_metadata(db_metadata).tables[site_table.name].columns
 
     # Test for the presence and removal of a simple column
 

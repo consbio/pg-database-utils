@@ -73,7 +73,7 @@ def query_tsvector_columns(table_or_name, column_names, query, limit=None):
         WHERE to_tsvector(col1||' '||col2||' '||...) @@ to_tsquery('english', '''query''')
 
     :param table_or_name: a sqlalchemy table object or the name of a table to query
-    :param column_names: one or more comma-seperated tsvector-indexed column names
+    :param column_names: one or more comma-seperated tsvector-indexed column names, or a list of them
     :param query: a query to be parsed for matching a tsvector index
     :param limit: an optional number of rows to limit the query results
     """
@@ -367,7 +367,8 @@ def insert_into(table_name, values, column_names, create_if_not_exists=False, in
 
     :param table_name: the name of the table into which to insert records
     :param values: a list of lists containing literal values to insert into the table
-    :param column_names: the list of column names corresponding to the order of the values provided
+    :param column_names: one or more comma-seperated column names, or a list of column names
+        * column names must correspond exactly to the order of the values provided
         example names:  'col1,col2,col3' OR ['col1', 'col2', 'col3']
         example values: [(0, 42, 'first'), (True, 86, 'next'), (1, -4, 'last')]
     """
@@ -454,13 +455,16 @@ def select_into(table_name, values, column_names, column_types=None, inspect=Tru
 
     :param table_name: the name of the table to create from the values provided
     :param values: a list of lists containing literal values to insert into the table
-    :param column_names: the list of column names corresponding to the order of the values provided
+    :param column_names: one or more comma-seperated column names, or a list of column names
+        * column names must correspond exactly to the order of the types and values provided
     :param column_types: an optional list of types corresponding to column names
+        * column types must correspond exactly to the order of the columns and values provided
+        * inserted columns will default to unicode text if types are invalid or not provided
+        * see types.COLUMN_TYPE_MAP for string values that map to types
+
         example names:  'col1,col2,col3' OR ['col1', 'col2', 'col3']
         example types:  'bool,int,varchar' OR ['bool', 'int', 'varchar']
         example values: [(0, 42, 'first'), (True, 86, 'next'), (1, -4, 'last')]
-
-    The inserted columns will default to unicode text if types are invalid or not provided.
     """
 
     if table_exists(table_name):
