@@ -3,6 +3,8 @@ import logging
 import os
 import pathlib
 
+from frozendict import frozendict
+
 logger = logging.getLogger(__name__)
 
 DJANGO_SETTINGS_VAR = "DJANGO_SETTINGS_MODULE"
@@ -14,7 +16,23 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 5432
 DEFAULT_USER = "postgres"
 
-SUPPORTED_CONFIG = {
+DATABASE_PROPS = frozenset({
+    # Supported database info properties
+    "database_engine", "engine", "drivername",
+    "database_name", "name", "database",
+    "database_port", "port",
+    "database_host", "host",
+    "database_user", "user", "username",
+    "database_password", "password",
+    # Supported django database properties
+    "ENGINE", "django_engine",
+    "NAME", "django_name",
+    "PORT", "django_port",
+    "HOST", "django_host",
+    "USER", "django_user",
+    "PASSWORD", "django_password",
+})
+SUPPORTED_CONFIG = frozendict({
     # Required database configuration
     "database-name": None,
     # Optional database configuration
@@ -25,7 +43,10 @@ SUPPORTED_CONFIG = {
     "database-password": None,
     # Optionally specify configured Django database
     "django-database": DEFAULT_DJANGO_DB,
-}
+    # Other options:
+    "date-format": "%Y-%m-%d",
+    "timestamp-format": "%Y-%m-%d %H:%M:%S",
+})
 
 
 try:
@@ -36,6 +57,31 @@ except ImportError:
 
 
 class PgDatabaseSettings(object):
+    """
+    A class to consolidate settings derived from the following sources:
+        * A JSON file identified by the DATABASE_CONFIG_JSON environment variable
+        * An appropriately configured Django settings file if Django is installed
+
+    Precedence of settings duplicated in both sources is as follows:
+        * If no DATABASE_CONFIG_JSON file is specified, use Django.DATABASES
+        * If DATABASE_CONFIG_JSON specifies a django-database, then use that Django database
+        * Otherwise use the keys defined in DATABASE_CONFIG_JSON
+
+    This is how database info is mapped between sources:
+        | config key        | django   | database_info | settings property |
+        |:------------------|:---------|:--------------|:------------------|
+        | database-engine   | ENGINE   | drivername    | database_engine   |
+        | database-host     | HOST     | host          | database_host     |
+        | database-port     | PORT     | port          | database_port     |
+        | database-name     | NAME     | database      | database_name     |
+        | database-user     | USER     | username      | database_user     |
+        | database-password | PASSWORD | password      | database_password |
+
+    Of the above, only database-name and database-user are required.
+    The others either have defaults or are not necessary for interaction with a database.
+    """
+
+    empty = EMPTY
 
     _database_info = None
     _database_config = None
@@ -52,7 +98,7 @@ class PgDatabaseSettings(object):
         if self._database_config is not None:
             return
 
-        self._database_config = {}
+        self._database_config = frozendict()
 
         if ENVIRONMENT_VARIABLE not in os.environ:
             logger.debug("Database configuration not provided")
@@ -66,7 +112,7 @@ class PgDatabaseSettings(object):
                 config_path = os.environ[ENVIRONMENT_VARIABLE]
                 config_file = pathlib.Path(config_path).expanduser().resolve(strict=True)
                 with open(config_file) as config_json:
-                    self._database_config = json.loads(config_json.read())
+                    database_config = json.loads(config_json.read())
 
             except FileNotFoundError:
                 raise EnvironmentError(f"Database configuration file does not exist: {config_path}")
@@ -74,9 +120,11 @@ class PgDatabaseSettings(object):
                 raise EnvironmentError(f"Database configuration file does not contain JSON: {config_path}")
 
             # Remove values from overridden configuration if not present in supported configuration
-            self._database_config = {k: v for k, v in self._database_config.items() if k in SUPPORTED_CONFIG}
+            database_config = {k: v for k, v in database_config.items() if k in SUPPORTED_CONFIG}
             # Assign defaults in supported configuration if not present in overridden configuration
-            self._database_config.update({k: v for k, v in SUPPORTED_CONFIG.items() if k not in self._database_config})
+            database_config.update({k: v for k, v in SUPPORTED_CONFIG.items() if k not in database_config})
+
+            self._database_config = frozendict(database_config)
 
     def _init_django_settings(self):
         """ Capture properly configured Django settings if Django is present and configured """
@@ -102,13 +150,16 @@ class PgDatabaseSettings(object):
             logger.debug(f"Django is not configured: {ex}")
 
     def _init_database_info(self):
-        """ Lazily initialize database info from configuration file or Django settings """
+        """
+        Lazily initializes database info from configuration file or Django settings.
+        The implementation is lazy in that database info isn't determined at instantiation time.
+        """
 
         if self._database_info is not None:
             return
 
-        self._database_info = {}
-        self._django_database = {}
+        self._database_info = frozendict()
+        self._django_database = frozendict()
 
         # Validate and apply database configuration
 
@@ -126,24 +177,29 @@ class PgDatabaseSettings(object):
         elif not self._database_config or self._database_config.get("django-database") != DEFAULT_DJANGO_DB:
             logger.debug("Applying Django database configuration")
 
-            django_database = self._database_config.get("django-database") or "default"
-            django_database = dict(django_databases[django_database])
+            django_db_key = self._database_config.get("django-database") or "default"
+            django_database = {}.fromkeys(("ENGINE", "HOST", "PORT", "NAME", "USER", "PASSWORD"))
+            django_database.update(django_databases[django_db_key])
 
             # Update configuration with values from Django config or defaults
-            self._database_config["database-engine"] = (django_database.get("ENGINE") or DEFAULT_ENGINE).split(".")[-1]
-            self._database_config["database-host"] = django_database.get("HOST") or DEFAULT_HOST
-            self._database_config["database-port"] = django_database.get("PORT") or DEFAULT_PORT
-            self._database_config["database-name"] = django_database.get("NAME")
-            self._database_config["database-user"] = django_database.get("USER")
-            self._database_config["database-password"] = django_database.get("PASSWORD")
+            database_config = dict(self._database_config)
+            database_config.update({
+                "database-engine": (django_database.get("ENGINE") or DEFAULT_ENGINE).split(".")[-1],
+                "database-host": django_database.get("HOST") or DEFAULT_HOST,
+                "database-port": django_database.get("PORT") or DEFAULT_PORT,
+                "database-name": django_database.get("NAME"),
+                "database-user": django_database.get("USER"),
+                "database-password": django_database.get("PASSWORD"),
+            })
 
-            self._django_database = django_database
+            self._database_config = frozendict(database_config)
+            self._django_database = frozendict({f"django_{k}".lower(): v for k, v in django_database.items()})
 
         for database_key in ("database-name", "database-user"):
             if self._database_config[database_key] is None:
                 raise EnvironmentError(f'Database configuration missing required key: "{database_key}"')
 
-        self._database_info = {
+        database_info = {
             # Properties named after sqlalchemy.engine.url.URL params
             "database": self._database_config["database-name"],
             "drivername": self._database_config["database-engine"],
@@ -153,44 +209,77 @@ class PgDatabaseSettings(object):
             "password": self._database_config["database-password"],
         }
 
-        if self._database_info["password"] is None:
-            self._database_info["host"] = None
+        if database_info["password"] is None:
+            database_info["host"] = None
+
+        self._database_info = frozendict(database_info)
 
     @property
     def database_info(self):
         if self._database_info is None:
             self._init_database_info()
-        return dict(self._database_info)
+        return self._database_info
 
     @property
     def django_database(self):
         if self._django_database is None:
             self._init_database_info()
-        return dict(self._django_database)
+        return self._django_database
 
     @property
     def database_engine(self):
+        """ Routes "database_engine" to database info property: drivername """
         return (self._database_info or self.database_info)["drivername"]
 
     @property
-    def database_host(self):
-        return (self._database_info or self.database_info)["host"]
-
-    @property
     def database_name(self):
+        """ Routes "database_name" to database info property: database """
         return (self._database_info or self.database_info)["database"]
 
     @property
-    def database_port(self):
-        return (self._database_info or self.database_info)["port"]
-
-    @property
     def database_user(self):
+        """ Routes "database_user" to database info property: username """
         return (self._database_info or self.database_info)["username"]
 
-    @property
-    def database_password(self):
-        return (self._database_info or self.database_info)["password"]
+    def __getattr__(self, name):
+        """ Exposes database info and config consistently with precedence  """
+
+        if self._database_info is None and name in DATABASE_PROPS:
+            self._init_database_info()
+
+        # First check database info initialized from config or django
+
+        if self._database_info:
+            if name in self._database_info:
+                return (self._database_info or self.database_info)[name]
+
+            if name in ("engine", "name", "user"):
+                return getattr(self, f"database_{name}")
+
+            if name.startswith("database_"):
+                prop = name[len("database_"):]
+                if prop in self._database_info:
+                    return (self._database_info or self.database_info)[prop]
+
+        # Next check for references to django database (i.e. ENGINE, django_engine)
+
+        if self._django_database:
+            if name in self._django_database:
+                return (self._django_database or self.django_database)[name]
+
+            if name.isupper():
+                prop = f"django_{name.lower()}"
+                if prop in self._django_database:
+                    return (self._django_database or self.django_database)[prop]
+
+        # Finally check for any other configured properties (i.e. date_format)
+
+        if "-" not in name:
+            prop = name.replace("_", "-")
+            if prop in self._database_config:
+                return self._database_config[prop]
+
+        return None
 
 
 settings = PgDatabaseSettings()

@@ -33,7 +33,7 @@ setup(
         "pg_database", "pg_database.tests"
     ],
     install_requires=[
-        "psycopg2-binary>=2.7.7", "sqlalchemy>=1.3.0", "GeoAlchemy2>=0.7.0"
+        "frozendict>=1.2", "psycopg2-binary>=2.7.7", "sqlalchemy>=1.3.0", "GeoAlchemy2>=0.7.0"
     ],
     tests_require=["pytest", "pytest-cov"],
     cmdclass={"test": RunTests}

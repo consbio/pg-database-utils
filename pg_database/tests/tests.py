@@ -26,7 +26,6 @@ ENVIRONMENT_VARIABLE = conf.ENVIRONMENT_VARIABLE
 DEFAULT_ENGINE = conf.DEFAULT_ENGINE
 DEFAULT_PORT = conf.DEFAULT_PORT
 DEFAULT_USER = conf.DEFAULT_USER
-EMPTY = conf.EMPTY
 
 DATABASE_INFO = conf.settings.database_info
 DATABASE_NAME = conf.settings.database_name
@@ -303,22 +302,24 @@ def db_settings():
     db_env = os.environ.pop(ENVIRONMENT_VARIABLE, "")
     dj_env = os.environ.pop(DJANGO_SETTINGS_VAR, "")
 
+    settings = conf.settings
+
     yield {
         ENVIRONMENT_VARIABLE: db_env,
         DJANGO_SETTINGS_VAR: dj_env,
-        "DJANGO_CONFIGURED": conf.settings._django_settings is not EMPTY
+        "DJANGO_CONFIGURED": settings._django_settings is not settings.empty
     }
 
     if db_env:
         os.environ[ENVIRONMENT_VARIABLE] = db_env
     if dj_env:
         os.environ["DJANGO_SETTINGS_MODULE"] = dj_env
-        reload_django_settings(conf.settings)
+        reload_django_settings(settings)
 
 
 def reload_django_settings(db_settings):
     try:
-        db_settings._django_settings._wrapped = EMPTY
+        db_settings._django_settings._wrapped = db_settings.empty
     except Exception:
         pass
 
@@ -389,27 +390,77 @@ def test_conf_settings_dbinfo(db_settings):
 
     test_settings = PgDatabaseSettings()
 
+    # Test top-level database properties
+
+    conf_engine = DEFAULT_ENGINE
+    conf_name = "pg_database"
+    conf_port = DEFAULT_PORT
+    conf_host = None
+    conf_user = "django" if django_configured else DEFAULT_USER
+    conf_pass = None
+
+    assert test_settings.database_info["drivername"] == conf_engine
+    assert test_settings.database_info["database"] == conf_name
+    assert test_settings.database_info["port"] == conf_port
+    assert test_settings.database_info["host"] == conf_host
+    assert test_settings.database_info["username"] == conf_user
+    assert test_settings.database_info["password"] == conf_pass
+
+    for prop in ("database_engine", "engine", "drivername"):
+        assert getattr(test_settings, prop) == conf_engine
+    for prop in ("database_name", "name", "database"):
+        assert getattr(test_settings, prop) == conf_name
+    for prop in ("database_port", "port"):
+        assert getattr(test_settings, prop) == conf_port
+    for prop in ("database_host", "host"):
+        assert getattr(test_settings, prop) == conf_host
+    for prop in ("database_user", "user", "username"):
+        assert getattr(test_settings, prop) == conf_user
+    for prop in ("database_password", "password"):
+        assert getattr(test_settings, prop) == conf_pass
+
+    # Test invalid top-level database properties
+
+    invalid_props = (
+        "database-engine", "database-name", "database-port",
+        "database-host", "database-user", "database-password"
+    )
+    for prop in invalid_props:
+        assert getattr(test_settings, prop) is None
+
+    # Test django-specific database properties
+
+    django_engine = "django.db.backends.postgresql" if django_configured else None
+    django_name = conf_name if django_configured else None
+    django_port = None
+    django_host = None
+    django_user = "django" if django_configured else None
+    django_pass = None
+
     if not django_configured:
-        assert test_settings.database_info["username"] == DEFAULT_USER
-        assert test_settings.database_user == DEFAULT_USER
         assert test_settings.django_database == {}
     else:
-        assert test_settings.django_database["ENGINE"] == "django.db.backends.postgresql"
-        assert test_settings.django_database["NAME"] == "pg_database"
-        assert test_settings.django_database["USER"] == "django"
-        assert test_settings.database_user == "django"
+        assert test_settings.django_database["django_engine"] == django_engine
+        assert test_settings.django_database["django_name"] == conf_name
+        assert test_settings.django_database["django_user"] == conf_user
 
-    assert test_settings.database_info["database"] == "pg_database"
-    assert test_settings.database_info["drivername"] == DEFAULT_ENGINE
-    assert test_settings.database_info["port"] == DEFAULT_PORT
-    assert test_settings.database_info["host"] is None
-    assert test_settings.database_info["password"] is None
+    for prop in ("ENGINE", "django_engine"):
+        assert getattr(test_settings, prop) == django_engine
+    for prop in ("NAME", "django_name"):
+        assert getattr(test_settings, prop) == django_name
+    for prop in ("PORT", "django_port"):
+        assert getattr(test_settings, prop) == django_port
+    for prop in ("HOST", "django_host"):
+        assert getattr(test_settings, prop) == django_host
+    for prop in ("USER", "django_user"):
+        assert getattr(test_settings, prop) == django_user
+    for prop in ("PASSWORD", "django_password"):
+        assert getattr(test_settings, prop) == django_pass
 
-    assert test_settings.database_name == "pg_database"
-    assert test_settings.database_engine == DEFAULT_ENGINE
-    assert test_settings.database_port == DEFAULT_PORT
-    assert test_settings.database_host is None
-    assert test_settings.database_password is None
+    # Test invalid django-specific database properties
+
+    for prop in ("Engine", "Name", "Port", "Host", "User", "Password"):
+        assert getattr(test_settings, prop) is None
 
 
 def db_create(postgres_engine):
