@@ -406,7 +406,7 @@ def test_conf_settings_props():
     assert test_settings.date_format == DEFAULT_DATE_FORMAT
     assert test_settings.timestamp_format == DEFAULT_TIMESTAMP_FORMAT
 
-    # Test top-level database properties
+    # Test database info dict
 
     test_settings = PgDatabaseSettings()
 
@@ -424,6 +424,10 @@ def test_conf_settings_props():
     assert test_settings.database_info["username"] == conf_user
     assert test_settings.database_info["password"] == conf_pass
 
+    # Test top-level database properties
+
+    test_settings = PgDatabaseSettings()
+
     for prop in ("database_engine", "engine", "drivername"):
         assert getattr(test_settings, prop) == conf_engine
     for prop in ("database_name", "name", "database"):
@@ -437,7 +441,7 @@ def test_conf_settings_props():
     for prop in ("database_password", "password"):
         assert getattr(test_settings, prop) == conf_pass
 
-    # Test invalid top-level database properties
+    # Test invalid top-level database properties (no dashes allowed)
 
     invalid_props = (
         "database-engine", "database-name", "database-port",
@@ -446,7 +450,7 @@ def test_conf_settings_props():
     for prop in invalid_props:
         assert getattr(test_settings, prop) is None
 
-    # Test django-specific database properties
+    # Test django database dict
 
     test_settings = PgDatabaseSettings()
 
@@ -463,6 +467,10 @@ def test_conf_settings_props():
         assert test_settings.django_database["django_engine"] == django_engine
         assert test_settings.django_database["django_name"] == conf_name
         assert test_settings.django_database["django_user"] == conf_user
+
+    # Test django-specific database properties
+
+    test_settings = PgDatabaseSettings()
 
     for prop in ("ENGINE", "django_engine"):
         assert getattr(test_settings, prop) == django_engine
