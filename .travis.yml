@@ -21,6 +21,7 @@ before_install:
   - sudo cp /etc/postgresql/{10,11}/main/pg_hba.conf
   - sudo service postgresql restart 11
 install:
+  - pip install frozendict
   - pip install sqlalchemy
   - pip install GeoAlchemy2
   - pip install psycopg2-binary
