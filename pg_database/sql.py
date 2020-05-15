@@ -20,11 +20,12 @@ def _query_limited(query, limit=None):
         if limit is None:
             return list(conn.execute(query).fetchall())
 
+        cursor = conn.execute(query)
         results = []
 
         try:
             for _ in range(limit):
-                results.append(next(conn.execute(query)))
+                results.append(next(cursor))
         except StopIteration:
             pass
 
@@ -90,13 +91,8 @@ def query_tsvector_columns(table_or_name, column_names, query, limit=None):
         f"'''{query}'''",
         postgresql_regconfig="english",
     )
-    search_query = Select(table.columns).distinct().where(search_condition)
 
-    if limit is not None:
-        search_query = search_query.limit(int(limit))
-
-    with get_engine().connect() as conn:
-        return list(conn.execute(search_query).fetchall())
+    return _query_limited(Select(table.columns).distinct().where(search_condition), limit)
 
 
 def update_from(table_name, into_table_name, join_columns, target_columns=None):

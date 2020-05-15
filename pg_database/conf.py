@@ -16,6 +16,9 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 5432
 DEFAULT_USER = "postgres"
 
+DEFAULT_DATE_FORMAT = "%Y-%m-%d"
+DEFAULT_TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
+
 DATABASE_PROPS = frozenset({
     # Supported database info properties
     "database_engine", "engine", "drivername",
@@ -42,10 +45,10 @@ SUPPORTED_CONFIG = frozendict({
     "database-user": "postgres",
     "database-password": None,
     # Optionally specify configured Django database
-    "django-database": DEFAULT_DJANGO_DB,
+    "django-db-key": DEFAULT_DJANGO_DB,
     # Other options:
-    "date-format": "%Y-%m-%d",
-    "timestamp-format": "%Y-%m-%d %H:%M:%S",
+    "date-format": DEFAULT_DATE_FORMAT,
+    "timestamp-format": DEFAULT_TIMESTAMP_FORMAT,
 })
 
 
@@ -64,7 +67,7 @@ class PgDatabaseSettings(object):
 
     Precedence of settings duplicated in both sources is as follows:
         * If no DATABASE_CONFIG_JSON file is specified, use Django.DATABASES
-        * If DATABASE_CONFIG_JSON specifies a django-database, then use that Django database
+        * If DATABASE_CONFIG_JSON specifies a django-db-key, then use that Django database
         * Otherwise use the keys defined in DATABASE_CONFIG_JSON
 
     This is how database info is mapped between sources:
@@ -174,10 +177,10 @@ class PgDatabaseSettings(object):
         elif not django_databases:
             logger.debug("Using provided database configuration")
 
-        elif not self._database_config or self._database_config.get("django-database") != DEFAULT_DJANGO_DB:
+        elif not self._database_config or self._database_config.get("django-db-key") != DEFAULT_DJANGO_DB:
             logger.debug("Applying Django database configuration")
 
-            django_db_key = self._database_config.get("django-database") or "default"
+            django_db_key = self._database_config.get("django-db-key") or "default"
             django_database = {}.fromkeys(("ENGINE", "HOST", "PORT", "NAME", "USER", "PASSWORD"))
             django_database.update(django_databases[django_db_key])
 

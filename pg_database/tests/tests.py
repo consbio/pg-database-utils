@@ -27,6 +27,10 @@ DEFAULT_ENGINE = conf.DEFAULT_ENGINE
 DEFAULT_PORT = conf.DEFAULT_PORT
 DEFAULT_USER = conf.DEFAULT_USER
 
+DEFAULT_DJANGO_DB = conf.DEFAULT_DJANGO_DB
+DEFAULT_DATE_FORMAT = conf.DEFAULT_DATE_FORMAT
+DEFAULT_TIMESTAMP_FORMAT = conf.DEFAULT_TIMESTAMP_FORMAT
+
 DATABASE_INFO = conf.settings.database_info
 DATABASE_NAME = conf.settings.database_name
 SITE_TABLE_NAME = "site_table"
@@ -388,9 +392,23 @@ def test_conf_settings_dbinfo(db_settings):
     os.environ["DJANGO_SETTINGS_MODULE"] = dj_env
     reload_django_settings(conf.settings)
 
+
+def test_conf_settings_props():
+
+    settings = conf.settings
+    django_configured = settings._django_settings is not settings.empty
+
+    # Test non-database properties
+
     test_settings = PgDatabaseSettings()
 
+    assert test_settings.django_db_key == "default"
+    assert test_settings.date_format == DEFAULT_DATE_FORMAT
+    assert test_settings.timestamp_format == DEFAULT_TIMESTAMP_FORMAT
+
     # Test top-level database properties
+
+    test_settings = PgDatabaseSettings()
 
     conf_engine = DEFAULT_ENGINE
     conf_name = "pg_database"
@@ -429,6 +447,8 @@ def test_conf_settings_dbinfo(db_settings):
         assert getattr(test_settings, prop) is None
 
     # Test django-specific database properties
+
+    test_settings = PgDatabaseSettings()
 
     django_engine = "django.db.backends.postgresql" if django_configured else None
     django_name = conf_name if django_configured else None
@@ -1455,35 +1475,35 @@ def test_query_json_keys(db_metadata):
     # Test a query that will return all columns for all records
     limit = len(SITE_TEST_DATA)
     search_results = query_json_keys(site_table, "site_json", {"city": "ALBANY", "state": "NY"})
-    assert limit == len(search_results)
+    assert limit == len({result["pk"] for result in search_results})
     assert all(len(result) == len(SITE_TABLE_COLS) for result in search_results)
 
     # Test limiting a query that will return all columns for all records
     limit = round(len(SITE_TEST_DATA) / 2)
     search_results = query_json_keys(site_table, "site_json", {"city": "ALBANY", "state": "NY"}, limit=limit)
-    assert limit == len(search_results)
+    assert limit == len({result["pk"] for result in search_results})
     assert all(len(result) == len(SITE_TABLE_COLS) for result in search_results)
 
     # Test an excessive limit on a query that will return all columns for all records
-    limit = len(SITE_TEST_DATA) * 2
-    search_results = query_json_keys(site_table, "site_json", {"city": "ALBANY", "state": "NY"}, limit=limit)
-    assert limit == len(search_results)
+    limit = len(SITE_TEST_DATA)
+    search_results = query_json_keys(site_table, "site_json", {"city": "ALBANY", "state": "NY"}, limit=(limit * 2))
+    assert limit == len({result["pk"] for result in search_results})
     assert all(len(result) == len(SITE_TABLE_COLS) for result in search_results)
 
     # Test a single matching address as string
     query, matches = json.dumps({"number": "7550", "street": "STATE ST STE CML5"}), 1
     search_results = query_json_keys(site_table.name, "site_json", query)
-    assert matches == len(search_results)
+    assert matches == len({result["pk"] for result in search_results})
 
     # Test an invalid address
     query, matches = {"street": "nope"}, 0
     search_results = query_json_keys(site_table.name, "site_json", query)
-    assert matches == len(search_results)
+    assert matches == len({result["pk"] for result in search_results})
 
     # Test an empty address
     query, matches = '""', 0
     search_results = query_json_keys(site_table.name, "site_json", query)
-    assert matches == len(search_results)
+    assert matches == len({result["pk"] for result in search_results})
 
 
 def test_query_tsvector_columns(db_metadata):
@@ -1504,53 +1524,54 @@ def test_query_tsvector_columns(db_metadata):
 
     # Test that limit applies to queries matching all records
     for limit, query in enumerate(("ALBANY", "NY", "STATE", "12224")):
-        assert limit == len(query_tsvector_columns(site_table, SEARCHABLE_COLS, query, limit=limit))
+        search_results = query_tsvector_columns(site_table, SEARCHABLE_COLS, query, limit=limit)
+        assert limit == len({result["pk"] for result in search_results})
 
     # Test an excessive limit on a query that matches all records
     query, matches = "NY", len(SITE_TEST_DATA)
     search_results = query_tsvector_columns(site_table.name, SEARCHABLE_COLS, query, limit=(matches * 2))
-    assert matches == len(search_results)
+    assert matches == len({result["pk"] for result in search_results})
     assert all(len(result) == len(SITE_TABLE_COLS) for result in search_results)
 
     # Test queries that match a single record
 
     query, matches = "0-0-7350-12224", 1
     search_results = query_tsvector_columns(site_table.name, SEARCHABLE_COLS, query)
-    assert matches == len(search_results)
+    assert matches == len({result["pk"] for result in search_results})
     assert all(len(result) == len(SITE_TABLE_COLS) for result in search_results)
 
     query, matches = "7550 STATE ST STE CML5", 1
     search_results = query_tsvector_columns(site_table.name, SEARCHABLE_COLS, query)
-    assert matches == len(search_results)
+    assert matches == len({result["pk"] for result in search_results})
     assert all(len(result) == len(SITE_TABLE_COLS) for result in search_results)
 
     terms = "7550 STATE ST STE CML5".split()[::-1]
     query, matches = " ".join(terms), 1
     search_results = query_tsvector_columns(site_table.name, SEARCHABLE_COLS, query)
-    assert matches == len(search_results)
+    assert matches == len({result["pk"] for result in search_results})
     assert all(len(result) == len(SITE_TABLE_COLS) for result in search_results)
 
     query, matches = "8-4-7550-12224 7550 STATE ST STE CML5 ALBANY NY 12224", 1
     search_results = query_tsvector_columns(site_table.name, SEARCHABLE_COLS, query)
-    assert matches == len(search_results)
+    assert matches == len({result["pk"] for result in search_results})
     assert all(len(result) == len(SITE_TABLE_COLS) for result in search_results)
 
     terms = "8-4-7550-12224 7550 STATE ST STE CML5 ALBANY NY 12224".split()[::-1]
     query, matches = " ".join(terms), 1
     search_results = query_tsvector_columns(site_table.name, SEARCHABLE_COLS, query)
-    assert matches == len(search_results)
+    assert matches == len({result["pk"] for result in search_results})
     assert all(len(result) == len(SITE_TABLE_COLS) for result in search_results)
 
     # Test queries that don't match any records
 
     query, matches = "nope", 0
     search_results = query_tsvector_columns(site_table.name, SEARCHABLE_COLS, query)
-    assert matches == len(search_results)
+    assert matches == len({result["pk"] for result in search_results})
 
     query, matches = "STATE ST", 0
     search_results = query_tsvector_columns(site_table.name, "obj_hash", query)
-    assert matches == len(search_results)
+    assert matches == len({result["pk"] for result in search_results})
 
     query, matches = "0-0-7350-12224", 0
     search_results = query_tsvector_columns(site_table.name, "site_addr", query)
-    assert matches == len(search_results)
+    assert matches == len({result["pk"] for result in search_results})
