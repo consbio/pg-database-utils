@@ -605,22 +605,22 @@ def test_create_index(db_metadata):
     # Test default index creation
     column_name = "site_addr"
     create_index(table_name, column_name)
-    assert_index(db_metadata, table_name, column_name=column_name, index_name=f"{table_name}_{column_name}_idx")
+    assert_index(db_metadata, table_name, column_name, index_name=f"{table_name}_{column_name}_idx")
 
     # Test unique index creation with overridden index name
     column_name = "obj_order"
     create_index(table_name, column_name, f"{table_name}_unique_idx", "unique")
-    assert_index(db_metadata, table_name, column_name=column_name, index_name=f"{table_name}_unique_idx")
+    assert_index(db_metadata, table_name, column_name, index_name=f"{table_name}_unique_idx")
 
     # Test json index creation (all ops)
     column_name = "test_json"
     create_index(table_name, column_name, index_op="json_full")
-    assert_index(db_metadata, table_name, column_name=column_name, index_name=f"{table_name}_{column_name}_idx")
+    assert_index(db_metadata, table_name, column_name, index_name=f"{table_name}_{column_name}_json_full_idx")
 
     # Test json index creation (path ops)
     column_name = "test_json"
     create_index(table_name, column_name, f"{table_name}_json_path_idx", "json_path")
-    assert_index(db_metadata, table_name, column_name=column_name, index_name=f"{table_name}_json_path_idx")
+    assert_index(db_metadata, table_name, column_name, index_name=f"{table_name}_json_path_idx")
 
     # Test multi-column index creation on in-memory table
 
@@ -631,7 +631,7 @@ def test_create_index(db_metadata):
     # COALESCE indexes are not loaded from database via table reflection
     column_names = [c for c in SEARCHABLE_COLS if c.startswith("site")]
     index_cols = "_".join(col for col in column_names)
-    index_name = f"{table_name}_{index_cols}_idx"
+    index_name = f"{table_name}_{index_cols}_coalesce_idx"
     create_index(test_table, column_names, index_op="coalesce")
     assert_index(db_metadata, table_name, index_name=index_name)
 
@@ -758,9 +758,9 @@ def test_create_table(db_metadata):
         **{k: v() for k, v in SITE_COL_TYPES.items()}
     )
     assert_table(db_metadata, table_name, SITE_COL_TYPES)
-    assert_index(db_metadata, table_name, index_name=f"{table_name}_pk_idx")
-    assert_index(db_metadata, table_name, index_name=f"{table_name}_obj_order_idx")
-    assert_index(db_metadata, table_name, index_name=f"{table_name}_pk_obj_order_idx")
+    assert_index(db_metadata, table_name, index_name=f"{table_name}_pk_unique_idx")
+    assert_index(db_metadata, table_name, index_name=f"{table_name}_obj_order_unique_idx")
+    assert_index(db_metadata, table_name, index_name=f"{table_name}_pk_obj_order_unique_idx")
 
 
 def test_drop_table(db_metadata):
