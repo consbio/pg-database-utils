@@ -342,7 +342,10 @@ def create_index(table_or_name, column_names, index_name=None, index_op=None):
 
     if not index_name:
         column_index = "_".join(col for col in column_names)
-        index_name = f"{table.name}_{column_index}_idx"
+        if not index_op:
+            index_name = f"{table.name}_{column_index}_idx"
+        else:
+            index_name = f"{table.name}_{column_index}_{index_op}_idx"
 
     index_kwargs = {"_table": table}
 
