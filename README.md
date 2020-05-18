@@ -24,9 +24,11 @@ pip install pg_database_utils
 
 ## Configuration
 
-This libary can be configured to work with or without Django.
+This project is designed to make configuration easy.
+If you already have database connections defined in Django, then you can reuse them;
+otherwise, you can configure your own without having Django as a dependency.
 
-**To configure this project along-side Django**:
+### To configure with Django
 
 If you want to use the default database, there is nothing to do; otherwise:
 1. Create a JSON configuration file:
@@ -40,7 +42,7 @@ If you want to use the default database, there is nothing to do; otherwise:
 **Note**: "django-db-key" takes precedence over all other database connection settings in the JSON file.
 If you specify a Django database, those database connection settings will be used.
 
-**To configure this project by itself**:
+### To configure without Django
 
 1. Create a JSON configuration file with at least the required settings (i.e. `database-name`):
 ```python
@@ -55,32 +57,37 @@ If you specify a Django database, those database connection settings will be use
 ```
 2. Set the `DATABASE_CONFIG_JSON` environment variable to point to the location of the file
 
-**Note**: additional configuration options include:
+### Regardless of the above
+
+Additional configuration options include:
 ```python
 {
-    "date-format": "optional",      # Defaults to "%Y-%m-%d" for converting date strings
-    "timestamp-format": "optional"  # Defaults to "%Y-%m-%d %H:%M:%S" for converting datetime strings
+    "date-format": "optional",      # Defaults to "%Y-%m-%d"
+    "timestamp-format": "optional"  # Defaults to "%Y-%m-%d %H:%M:%S"
 }
 ```
 
+**Note**: "date-format" and "timestamp-format" must be compatible with the formatting configured in PostgreSQL.
+
+
 ## Usage
 
-One of the goals of this library is to make common database operations easy and readable,
+This library is designed to make common database operations easy and readable,
 so most of the utility functions are designed to work with either strings or `sqlalchemy` objects as parameters.
 
-**Here are some of the available schema utilities**
+### Schema utilities
 
 * Creating and relating tables
 ```python
 from pg_database import schema
 
-schema.create_table(
+my_table = schema.create_table(
     "my_table",
     dropfirst=True,
     index_cols={"id": "unique"},
     id="int", name="int", addr="text", deleted="bool"
 )
-schema.create_index("my_table", "name", index_op="unique")
+schema.create_index(my_table, "name", index_op="unique")
 
 schema.create_table("other_table", id="int", my_table_id="int", val="text")
 schema.create_foreign_key("other_table", "my_table_id", "my_table.id")
@@ -102,16 +109,19 @@ from pg_database import schema
 all_tables = schema.get_metadata().tables
 other_table = all_tables["other_table"]
 
-schema.drop_foreign_key("other_table", "other_table_my_table_id_fkey")
+schema.drop_foreign_key(other_table, "other_table_my_table_id_fkey")
 schema.drop_index("my_table", index_name="my_table_json_col_json_full_idx")
 schema.drop_table("my_table")
-schema.drop_table("other_table")
+schema.drop_table(other_table)
 ```
+
+### SQL utilities
+
 * Inserting rows
 ```python
 import json
 from datetime import datetime, timedelta
-from pg_database import sql, schema
+from pg_database import sql
 
 create_date = datetime.now()
 
