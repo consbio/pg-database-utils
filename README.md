@@ -17,27 +17,32 @@ It also includes:
 
 
 ## Installation
-Install with `pip install pg_database_utils`.
+Install with:
+```bash
+pip install pg_database_utils
+```
 
 ## Configuration
 
-This libary can be configured to work without Django or along-side Django.
-Configuration involves two steps:
-1. Create a JSON configuration file
-2. Set the `DATABASE_CONFIG_JSON` environment variable to point to the location of the file
+This libary can be configured to work with or without Django.
 
 **To configure this project along-side Django**:
 
+If you want to use the default database, there is nothing to do; otherwise:
+1. Create a JSON configuration file:
 ```python
 {
-    "django-db-key": "default"
+    "django-db-key": "not_default"
 }
 ```
+2. Set the `DATABASE_CONFIG_JSON` environment variable to point to the location of the file
 
-> If "django-db-key" is set, it will take precedence over other database connection settings
+**Note**: "django-db-key" takes precedence over all other database connection settings in the JSON file.
+If you specify a Django database, those database connection settings will be used.
 
 **To configure this project by itself**:
 
+1. Create a JSON configuration file with at least the required settings (i.e. `database-name`):
 ```python
 {
     "database-name": "required",     # Name of the database to query
@@ -48,9 +53,9 @@ Configuration involves two steps:
     "database-password": "optional"  # For trusted users like postgres
 }
 ```
+2. Set the `DATABASE_CONFIG_JSON` environment variable to point to the location of the file
 
-**Other configuration options include**:
-
+**Note**: additional configuration options include:
 ```python
 {
     "date-format": "optional",      # Defaults to "%Y-%m-%d" for converting date strings
@@ -60,8 +65,8 @@ Configuration involves two steps:
 
 ## Usage
 
-One of the goals of this library is to make common database operations easy and readable.
-Many of the utility functions therefore are designed to require as few imports from `sqlalchemy` as possible.
+One of the goals of this library is to make common database operations easy and readable,
+so most of the utility functions are designed to work with either strings or `sqlalchemy` objects as parameters.
 
 **Here are some of the available schema utilities**
 
@@ -90,7 +95,7 @@ schema.create_index("my_table", "name", index_op="to_tsvector")
 schema.create_column("my_table", "json_col", "jsonb", checkfirst=True)
 schema.create_index("my_table", "json_col", index_op="json_full")
 ```
-* Dropping tables
+* Dropping database objects
 ```python
 from pg_database import schema
 
@@ -112,7 +117,11 @@ create_date = datetime.now()
 
 sql.select_into(
     "new_table",
-    [(1, "one", {}, create_date), (2, "two", {}, create_date), (3, "three", {}, create_date)],
+    [
+        (1, "one", {}, create_date),
+        (2, "two", {}, create_date),
+        (3, "three", {}, create_date)
+    ],
     "id,val,json,created",
     "int,text,jsonb,date"
 )
@@ -123,13 +132,13 @@ from pg_database import sql
 
 def update_row(row):
     row = list(row)
-    pk = row[0]
-    val = row[1]
-    created = row[2]
-    jval = row[3]
+
+    pk, val, created, jval = row[0], row[1], row[2], row[3]
+
     row[1] = f"{pk} {val} first batch"
     row[2] = created + timedelta(days=1)
     row[3] = {"id": pk, "val": val, "batch": "first"}
+
     return row
 
 sql.update_rows("new_table", "id", "val,created,json", update_row, batch_size=3)
