@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 def _query_limited(query, limit=None):
+    """ Helper to limit query results without the full table scan executed by LIMIT """
 
     with get_engine().connect() as conn:
         if limit is None:
