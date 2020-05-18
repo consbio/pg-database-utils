@@ -157,9 +157,13 @@ sql.update_rows("new_table", "id", "val,created,json", update_row, batch_size=3)
 ```python
 from pg_database import sql, schema
 
-schema.create_index("new_table", "json", index_op="json_path")
-schema.create_index("new_table", "val", index_op="to_tsvector")
+# Reduce database queries by sending a sqlalchemy table
+all_tables = schema.get_metadata().tables
+new_table = all_tables["new_table"]
 
-sql.query_json_keys("new_table", "json", {"batch": "first"})
+schema.create_index(new_table, "json", index_op="json_path")
+schema.create_index(new_table, "val", index_op="to_tsvector")
+
+sql.query_json_keys(new_table, "json", {"batch": "first"})
 sql.query_tsvector_columns("new_table", "val", "batch first")
 ```
