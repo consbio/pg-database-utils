@@ -12,6 +12,8 @@ COLUMN_TYPE_MAP = frozendict({
     "bool": sqltypes.Boolean,
     "boolean": sqltypes.Boolean,
     "bigint": sqltypes.BigInteger,
+    "binary": sqltypes.LargeBinary,
+    "bytea": sqltypes.LargeBinary,
     "int": sqltypes.Integer,
     "integer": sqltypes.Integer,
     "float": sqltypes.Float,

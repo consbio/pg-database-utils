@@ -4,10 +4,12 @@ import decimal
 import json
 import os
 import pytest
+import warnings
 
 from sqlalchemy import create_engine, Column, Index, Table, select
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine.url import URL
+from sqlalchemy.exc import SAWarning
 from sqlalchemy.sql import func, text, sqltypes
 from sqlalchemy.schema import AddConstraint, DropConstraint, ForeignKeyConstraint, MetaData
 
@@ -36,6 +38,11 @@ DATABASE_NAME = conf.settings.database_name
 SITE_TABLE_NAME = "site_table"
 ALL_TEST_TABLES = (SITE_TABLE_NAME, f"test_{SITE_TABLE_NAME}", f"tmp_{SITE_TABLE_NAME}")
 
+GEOM_COL_TYPES = {
+    "test_geom": ("geometry", "geometry(POINT,4326)"),
+    "test_line": ("geometry", "geometry(LINESTRING,4326)"),
+    "test_poly": ("geometry", "geometry(POLYGON,4326)"),
+}
 SITE_COL_TYPES = {
     "pk": sqltypes.Integer,
     "obj_order": sqltypes.Numeric,
@@ -58,9 +65,11 @@ SITE_TABLE_COLS = (
     "countyname",
     "test_bool",
     "test_date",
-    "test_geom",
     "test_json",
-    "test_none"
+    "test_none",
+    "test_geom",
+    "test_line",
+    "test_poly",
 )
 SEARCHABLE_COLS = ("obj_hash", "site_addr", "site_city", "site_state", "site_zip", "countyname")
 
@@ -78,8 +87,10 @@ SITE_TEST_DATA = [
         "test_bool": 1,
         "test_date": datetime.datetime.strptime("2020-02-02 00:00:00", DATETIME_FORMAT),
         "test_json": {"data": [1, 2, 3]},
-        "test_geom": None,
         "test_none": "null",
+        "test_geom": None,
+        "test_line": None,
+        "test_poly": None,
     },
     {
         "pk": "1",
@@ -94,8 +105,10 @@ SITE_TEST_DATA = [
         "test_bool": 0,
         "test_date": datetime.datetime.strptime("2010-01-01", DATE_FORMAT),
         "test_json": ["one", "two", "three"],
-        "test_geom": None,
         "test_none": None,
+        "test_geom": None,
+        "test_line": None,
+        "test_poly": None,
     },
     {
         "pk": "2",
@@ -110,8 +123,10 @@ SITE_TEST_DATA = [
         "test_bool": 0.0,
         "test_date": datetime.datetime.strptime("2020-01-02 00:00:00", DATETIME_FORMAT).date(),
         "test_json": [],
-        "test_geom": None,
         "test_none": "",
+        "test_geom": None,
+        "test_line": None,
+        "test_poly": None,
     },
     {
         "pk": "3",
@@ -126,8 +141,10 @@ SITE_TEST_DATA = [
         "test_bool": 1.0,
         "test_date": datetime.datetime.strptime("2010-02-02", DATE_FORMAT).date(),
         "test_json": {},
-        "test_geom": None,
         "test_none": "[]",
+        "test_geom": None,
+        "test_line": None,
+        "test_poly": None,
     },
     {
         "pk": "4",
@@ -142,8 +159,10 @@ SITE_TEST_DATA = [
         "test_bool": False,
         "test_date": "2020-02-01",
         "test_json": {"id": 4, "hash": "4-2-7450-12224"},
-        "test_geom": None,
         "test_none": "{}",
+        "test_geom": None,
+        "test_line": None,
+        "test_poly": None,
     },
     {
         "pk": "5",
@@ -158,8 +177,10 @@ SITE_TEST_DATA = [
         "test_bool": None,
         "test_date": "2010-02-01",
         "test_json": {"county": "Albany", "city": "ALBANY"},
-        "test_geom": None,
         "test_none": "0",
+        "test_geom": None,
+        "test_line": None,
+        "test_poly": None,
     },
     {
         "pk": "6",
@@ -174,8 +195,10 @@ SITE_TEST_DATA = [
         "test_bool": True,
         "test_date": "2020-04-04",
         "test_json": {"state": "NY", "zip": "https://calendar.google.com/"},
-        "test_geom": None,
         "test_none": "NaN",
+        "test_geom": None,
+        "test_line": None,
+        "test_poly": None,
     },
     {
         "pk": "7",
@@ -190,8 +213,10 @@ SITE_TEST_DATA = [
         "test_bool": 1,
         "test_date": "2020-03-03",
         "test_json": "7-6-7550-12224",
-        "test_geom": None,
         "test_none": "false",
+        "test_geom": None,
+        "test_line": None,
+        "test_poly": None,
     },
     {
         "pk": "8",
@@ -206,8 +231,10 @@ SITE_TEST_DATA = [
         "test_bool": True,
         "test_date": "2012-12-12",
         "test_json": 8,
-        "test_geom": None,
         "test_none": "undefined",
+        "test_geom": None,
+        "test_line": None,
+        "test_poly": None,
     },
 ]
 SITE_DATA_DICT = {obj["pk"]: obj for obj in SITE_TEST_DATA}
@@ -551,42 +578,48 @@ def db_engine():
 def db_metadata(db_engine):
     """ Provides setup and teardown functionality for database tests """
 
-    # Setup: create data table with indexes, and return metadata
+    with warnings.catch_warnings():
+        warnings.filterwarnings('ignore', message="Skipped unsupported reflection", category=SAWarning)
 
-    meta = MetaData(db_engine)
-    meta.reflect()
+        # Setup: create data table with indexes, and return metadata
 
-    test_table = make_table(meta, SITE_TABLE_NAME, SITE_TABLE_COLS, data=SITE_TEST_DATA)
+        meta = MetaData(db_engine)
+        meta.reflect()
 
-    # Drop and recreate test_geom as a point geometry column
-    geom_sql = (
-        f"ALTER TABLE {SITE_TABLE_NAME} DROP COLUMN test_geom;"
-        f"ALTER TABLE {SITE_TABLE_NAME} ADD COLUMN test_geom geometry(Point,4326);"
-    )
-    with db_engine.connect() as conn:
-        conn.execute(text(geom_sql).execution_options(autocommit=True))
+        make_table(meta, SITE_TABLE_NAME, SITE_TABLE_COLS, data=SITE_TEST_DATA)
 
-    # Create unique indexes on pk and obj_order
-    Index("obj_index", "pk", unique=True, _table=test_table).create()
-    Index("order_index", "obj_order", unique=True, _table=test_table).create()
-    Index("hash_index", "obj_hash", unique=True, _table=test_table).create()
+        for col_name, col_type in GEOM_COL_TYPES.items():
+            geom_sql = (
+                f"ALTER TABLE {SITE_TABLE_NAME} "
+                f"ALTER COLUMN {col_name} TYPE {col_type[0]} "
+                f"USING {col_name}::{col_type[1]};"
+            )
+            with db_engine.connect() as conn:
+                conn.execute(text(geom_sql).execution_options(autocommit=True))
 
-    # Create search index on primary test data columns
-    expressions = (func.to_tsvector("english", text("||' '||".join(SEARCHABLE_COLS))),)
-    Index("tsvector_index", *expressions, postgresql_using="gin", _table=test_table).create()
+        test_table = refresh_metadata(meta).tables[SITE_TABLE_NAME]
 
-    yield test_table.metadata
+        # Create unique indexes on pk and obj_order
+        Index("obj_index", "pk", unique=True, _table=test_table).create()
+        Index("order_index", "obj_order", unique=True, _table=test_table).create()
+        Index("hash_index", "obj_hash", unique=True, _table=test_table).create()
 
-    # Teardown: drop all data related tables used in the tests
+        # Create search index on primary test data columns
+        expressions = (func.to_tsvector("english", text("||' '||".join(SEARCHABLE_COLS))),)
+        Index("tsvector_index", *expressions, postgresql_using="gin", _table=test_table).create()
 
-    meta = refresh_metadata(meta)
-    tables = (t for t in meta.tables.values() if t.name in ALL_TEST_TABLES)
-    for fk in (c for t in tables for c in t.foreign_key_constraints):
-        DropConstraint(fk, cascade=True).execute(meta.bind)
+        yield test_table.metadata
 
-    meta = refresh_metadata(meta)
-    for test_table in (t for t in meta.tables.values() if t.name in ALL_TEST_TABLES):
-        test_table.drop()
+        # Teardown: drop all data related tables used in the tests
+
+        meta = refresh_metadata(meta)
+        tables = (t for t in meta.tables.values() if t.name in ALL_TEST_TABLES)
+        for fk in (c for t in tables for c in t.foreign_key_constraints):
+            DropConstraint(fk, cascade=True).execute(meta.bind)
+
+        meta = refresh_metadata(meta)
+        for test_table in (t for t in meta.tables.values() if t.name in ALL_TEST_TABLES):
+            test_table.drop()
 
 
 def test_database_setup(db_metadata):
@@ -634,8 +667,18 @@ def test_create_index(db_metadata):
     create_index(table_name, column_name, f"{table_name}_unique_idx", index_op="unique")
     assert_index(db_metadata, table_name, column_name, index_name=f"{table_name}_unique_idx")
 
-    # Test spatial index creation
+    # Test spatial index creation on point column
     column_name = "test_geom"
+    create_index(table_name, column_name, index_op="spatial")
+    assert_index(db_metadata, table_name, column_name, index_name=f"{table_name}_{column_name}_spatial_idx")
+
+    # Test spatial index creation on line column
+    column_name = "test_line"
+    create_index(table_name, column_name, index_op="spatial")
+    assert_index(db_metadata, table_name, column_name, index_name=f"{table_name}_{column_name}_spatial_idx")
+
+    # Test spatial index creation on polygon column
+    column_name = "test_poly"
     create_index(table_name, column_name, index_op="spatial")
     assert_index(db_metadata, table_name, column_name, index_name=f"{table_name}_{column_name}_spatial_idx")
 
@@ -1361,6 +1404,8 @@ def test_alter_column_type(db_metadata):
         alter_column_type(table_name, inject_sql, "int")
     with pytest.raises(ValueError, match="Invalid column type"):
         alter_column_type(table_name, "test_bool", inject_sql)
+    with pytest.raises(ValueError, match="Invalid column conversion"):
+        alter_column_type(table_name, "test_bool", "int", inject_sql)
 
     # PK column tests
 
@@ -1393,6 +1438,47 @@ def test_alter_column_type(db_metadata):
     alter_column_type(db_metadata.tables[table_name], "test_bool", "bool")
     altered = refresh_metadata(db_metadata).tables.get(table_name).columns.test_bool
     assert str(altered.type).lower() == "boolean"
+
+    # Geometry column tests
+
+    # Ensure original column is type GEOMETRY (should be POINT)
+    original = db_metadata.tables.get(table_name).columns.test_geom
+    assert str(original.type).lower().startswith("geometry")
+
+    # Test change from GEOMETRY to BYTEA
+    alter_column_type(db_metadata.tables[table_name], "test_geom", "bytea")
+    altered = refresh_metadata(db_metadata).tables.get(table_name).columns.test_geom
+    assert str(altered.type).lower() == "bytea"
+
+    # Test change from BYTEA to generic GEOMETRY (without "using")
+    alter_column_type(db_metadata.tables[table_name], "test_geom", "geometry")
+    altered = refresh_metadata(db_metadata).tables.get(table_name).columns.test_geom
+    assert str(altered.type).lower().startswith("geometry")
+
+    # Test change from GEOMETRY to TEXT
+    alter_column_type(db_metadata.tables[table_name], "test_geom", "text")
+    altered = refresh_metadata(db_metadata).tables.get(table_name).columns.test_geom
+    assert str(altered.type).lower() == "text"
+
+    # Test change from TEXT to POINT
+    alter_column_type(db_metadata.tables[table_name], "test_geom", "geometry", using="geometry(POINT,4326)")
+    altered = refresh_metadata(db_metadata).tables.get(table_name).columns.test_geom
+    assert str(altered.type).lower().startswith("geometry")
+
+    # Test change from POINT to LINE
+    alter_column_type(db_metadata.tables[table_name], "test_geom", "geometry", using="geometry(LINESTRING,4326)")
+    altered = refresh_metadata(db_metadata).tables.get(table_name).columns.test_geom
+    assert str(altered.type).lower().startswith("geometry")
+
+    # Test change from LINE to POLYGON
+    alter_column_type(db_metadata.tables[table_name], "test_geom", "geometry", using="geometry(POLYGON,4326)")
+    altered = refresh_metadata(db_metadata).tables.get(table_name).columns.test_geom
+    assert str(altered.type).lower().startswith("geometry")
+
+    # Test change from POLYGON back to BYTEA
+    alter_column_type(db_metadata.tables[table_name], "test_geom", "bytea")
+    altered = refresh_metadata(db_metadata).tables.get(table_name).columns.test_geom
+    assert str(altered.type).lower() == "bytea"
 
 
 def test_create_column(db_metadata):
@@ -1454,6 +1540,13 @@ def test_create_column(db_metadata):
     newcol = refresh_metadata(db_metadata).tables[site_table.name].columns.get(column)
     assert column == newcol.name
     assert str(newcol.type).lower().startswith("json")
+    assert newcol.nullable
+
+    column = "test_point"
+    create_column(site_table.name, column, "geometry(POINT,4326)", nullable=True)
+    newcol = refresh_metadata(db_metadata).tables[site_table.name].columns.get(column)
+    assert column == newcol.name
+    assert str(newcol.type).lower().startswith("geometry")
     assert newcol.nullable
 
 

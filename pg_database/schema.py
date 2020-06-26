@@ -8,7 +8,7 @@ from sqlalchemy.sql import and_, func, Select
 
 from .conf import settings
 from .types import column_type_for
-from .validation import validate_columns_in, validate_sql_params
+from .validation import validate_columns_in, validate_sql_params, SQL_TYPE_REGEX
 
 logger = logging.getLogger(__name__)
 
@@ -166,7 +166,7 @@ def drop_table(table_or_name):
 # Column utilities
 
 
-def alter_column_type(table_or_name, column_name, new_type):
+def alter_column_type(table_or_name, column_name, new_type, using=None):
     """
     Alter a column existing in a given table
     :param table_or_name: a sqlalchemy table object or the name of a table with a column to alter
@@ -175,6 +175,10 @@ def alter_column_type(table_or_name, column_name, new_type):
         * may be a string indicating the type
         * may also be a class defined in sqlalchemy.sql.sqltypes
         * see types.COLUMN_TYPE_MAP for string values that map to types
+    :param using: an optional, custom SQL expression to follow double colon for column data conversion:
+        ALTER TABLE t
+        ALTER COLUMN c TYPE geometry     // new_type="geometry"
+        USING c::geometry(Polygon:4326)  // using="geometry(Polygon:4326)"
     """
 
     if isinstance(table_or_name, str):
@@ -182,8 +186,15 @@ def alter_column_type(table_or_name, column_name, new_type):
     else:
         table_name = table_or_name.name
 
-    validate_sql_params(table=table_name, column=column_name, column_type=new_type)
+    validate_sql_params(table=table_name, column=column_name)
 
+    if not new_type or not SQL_TYPE_REGEX.match(new_type):
+        raise ValueError(f"Invalid column type: {new_type}")
+    if using and not SQL_TYPE_REGEX.match(using):
+        raise ValueError(f"Invalid column conversion: {using}")
+
+    if using is not None:
+        using = f"{column_name}::{using}"
     if new_type != "bool":
         using = f"{column_name}::{new_type}"
     else:
@@ -217,7 +228,9 @@ def create_column(table_or_name, column_name, column_type, checkfirst=False, def
     else:
         table_name = table_or_name.name
 
-    validate_sql_params(table=table_name, column=column_name, column_type=column_type)
+    validate_sql_params(table=table_name, column=column_name)
+    if not column_type or not SQL_TYPE_REGEX.match(column_type):
+        raise ValueError(f"Invalid column type: {column_type}")
 
     str_default = isinstance(default, str)
     if str_default:
@@ -340,6 +353,7 @@ def create_index(table_or_name, column_names, index_name=None, index_op=None):
         column_names = [c.strip() for c in column_names.split(",")]
 
     validate_columns_in(table, column_names, empty_table=table_or_name, message="Invalid index column names")
+
     if len(column_names) > 1 and (index_op == "spatial" or (index_op or "").startswith("json")):
         raise ValueError(f"Invalid index operation for multiple columns: {index_op}")
     elif index_op == "spatial" and not isinstance(table.columns[column_names[0]].type, Geometry):

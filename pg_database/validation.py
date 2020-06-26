@@ -1,6 +1,7 @@
 import re
 
 SAFE_SQL_REGEX = re.compile(r"^[0-9A-Za-z_]{1,31}$")
+SQL_TYPE_REGEX = re.compile(r"^[0-9A-Za-z_\(\),]+$")
 
 
 def validate_columns_in(table, column_names, empty_table, message=None):
@@ -29,8 +30,8 @@ def validate_sql_params(empty_message=None, **params):
     Helper for validating parameters to be passed to sqlalchemy for sql injection
     :param empty_message: a custom error message for required params
     :param params: a dict of parameter names to form the error message, for example:
-        table="invalid table"            --> "Invalid table name: invalid table"
-        sql_types=["invalid!", "types!"] --> "Invalid sql types: invalid!, types!"
+        table="bad-table"                    --> "Invalid table name: bad-table"
+        sql_types=["bad-type", "wrong-type"] --> "Invalid sql types: bad-type, wrong-type"
     """
 
     for param, param_val in params.items():
@@ -45,7 +46,7 @@ def validate_sql_params(empty_message=None, **params):
             if not val and empty_message:
                 raise ValueError(empty_message)
             if not SAFE_SQL_REGEX.match(str(val or "")):
-                invalid = ",".join(param_vals)
+                invalid = ",".join(str(p or "") for p in param_vals)
                 raise ValueError(f"Invalid {param_text}: {invalid}")
 
 
