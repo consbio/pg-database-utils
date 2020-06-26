@@ -1509,18 +1509,18 @@ def test_create_tsvector_column(db_metadata):
     with pytest.raises(Exception):
         create_tsvector_column(site_table.name, "site_addr", SEARCHABLE_COLS)
 
-    # Test column creation
+    # Test column creation (unable tests remotely: requires PostgreSQL 12)
 
-    col_name = "generated_search_col"
-    idx_name = "generated_tsvector_index"
-    create_tsvector_column(site_table.name, col_name, SEARCHABLE_COLS, index_name=idx_name)
-
-    newcol = refresh_metadata(db_metadata).tables[site_table.name].columns.get(col_name)
-    assert col_name == newcol.name
-    assert str(newcol.type).lower().startswith("tsvector")
-
-    # TSVECTOR indexes are not loaded from database via table reflection
-    assert_index(db_metadata, site_table.name, index_name=idx_name)
+    # col_name = "generated_search_col"
+    # idx_name = "generated_tsvector_index"
+    # create_tsvector_column(site_table.name, col_name, SEARCHABLE_COLS, index_name=idx_name)
+    #
+    # newcol = refresh_metadata(db_metadata).tables[site_table.name].columns.get(col_name)
+    # assert col_name == newcol.name
+    # assert str(newcol.type).lower().startswith("tsvector")
+    #
+    # # TSVECTOR indexes are not loaded from database via table reflection
+    # assert_index(db_metadata, site_table.name, index_name=idx_name)
 
 
 def test_query_json_keys(db_metadata):
