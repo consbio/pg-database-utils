@@ -85,7 +85,7 @@ my_table = schema.create_table(
     "my_table",
     dropfirst=True,
     index_cols={"id": "unique"},
-    id="int", name="int", addr="text", deleted="bool"
+    id="int", name="int", addr="text", geom="bytea", deleted="bool"
 )
 schema.create_index(my_table, "name", index_op="unique")
 
@@ -101,6 +101,10 @@ schema.create_index("my_table", "name", index_op="to_tsvector")
 
 schema.create_column("my_table", "json_col", "jsonb", checkfirst=True)
 schema.create_index("my_table", "json_col", index_op="json_full")
+
+# These steps require the postgis extension
+schema.alter_column_type("my_table", "geom", "geometry", using="geometry(Polygon,4326)")
+schema.create_index("my_table", "geom", index_op="spatial")
 ```
 * Dropping database objects
 ```python
