@@ -58,6 +58,7 @@ SITE_TABLE_COLS = (
     "countyname",
     "test_bool",
     "test_date",
+    "test_geom",
     "test_json",
     "test_none"
 )
@@ -77,6 +78,7 @@ SITE_TEST_DATA = [
         "test_bool": 1,
         "test_date": datetime.datetime.strptime("2020-02-02 00:00:00", DATETIME_FORMAT),
         "test_json": {"data": [1, 2, 3]},
+        "test_geom": None,
         "test_none": "null",
     },
     {
@@ -92,6 +94,7 @@ SITE_TEST_DATA = [
         "test_bool": 0,
         "test_date": datetime.datetime.strptime("2010-01-01", DATE_FORMAT),
         "test_json": ["one", "two", "three"],
+        "test_geom": None,
         "test_none": None,
     },
     {
@@ -107,6 +110,7 @@ SITE_TEST_DATA = [
         "test_bool": 0.0,
         "test_date": datetime.datetime.strptime("2020-01-02 00:00:00", DATETIME_FORMAT).date(),
         "test_json": [],
+        "test_geom": None,
         "test_none": "",
     },
     {
@@ -122,6 +126,7 @@ SITE_TEST_DATA = [
         "test_bool": 1.0,
         "test_date": datetime.datetime.strptime("2010-02-02", DATE_FORMAT).date(),
         "test_json": {},
+        "test_geom": None,
         "test_none": "[]",
     },
     {
@@ -137,6 +142,7 @@ SITE_TEST_DATA = [
         "test_bool": False,
         "test_date": "2020-02-01",
         "test_json": {"id": 4, "hash": "4-2-7450-12224"},
+        "test_geom": None,
         "test_none": "{}",
     },
     {
@@ -152,6 +158,7 @@ SITE_TEST_DATA = [
         "test_bool": None,
         "test_date": "2010-02-01",
         "test_json": {"county": "Albany", "city": "ALBANY"},
+        "test_geom": None,
         "test_none": "0",
     },
     {
@@ -167,6 +174,7 @@ SITE_TEST_DATA = [
         "test_bool": True,
         "test_date": "2020-04-04",
         "test_json": {"state": "NY", "zip": "https://calendar.google.com/"},
+        "test_geom": None,
         "test_none": "NaN",
     },
     {
@@ -182,6 +190,7 @@ SITE_TEST_DATA = [
         "test_bool": 1,
         "test_date": "2020-03-03",
         "test_json": "7-6-7550-12224",
+        "test_geom": None,
         "test_none": "false",
     },
     {
@@ -197,6 +206,7 @@ SITE_TEST_DATA = [
         "test_bool": True,
         "test_date": "2012-12-12",
         "test_json": 8,
+        "test_geom": None,
         "test_none": "undefined",
     },
 ]
@@ -548,6 +558,14 @@ def db_metadata(db_engine):
 
     test_table = make_table(meta, SITE_TABLE_NAME, SITE_TABLE_COLS, data=SITE_TEST_DATA)
 
+    # Drop and recreate test_geom as a point geometry column
+    geom_sql = (
+        f"ALTER TABLE {SITE_TABLE_NAME} DROP COLUMN test_geom;"
+        f"ALTER TABLE {SITE_TABLE_NAME} ADD COLUMN test_geom geometry(Point,4326);"
+    )
+    with db_engine.connect() as conn:
+        conn.execute(text(geom_sql).execution_options(autocommit=True))
+
     # Create unique indexes on pk and obj_order
     Index("obj_index", "pk", unique=True, _table=test_table).create()
     Index("order_index", "obj_order", unique=True, _table=test_table).create()
@@ -599,6 +617,10 @@ def test_create_index(db_metadata):
         create_index(table_name, "test_json,test_none", None, "json_full")
     with pytest.raises(ValueError, match="Invalid index operation for multiple columns"):
         create_index(table_name, "test_json,test_none", None, "json_path")
+    with pytest.raises(ValueError, match="Invalid index operation for multiple columns"):
+        create_index(table_name, "site_addr,test_none", None, "spatial")
+    with pytest.raises(ValueError, match="Invalid column type for spatial index"):
+        create_index(table_name, "site_addr", None, "spatial")
     with pytest.raises(ValueError, match="Unsupported index type"):
         create_index(table_name, "site_addr", None, "nope")
 
@@ -609,8 +631,13 @@ def test_create_index(db_metadata):
 
     # Test unique index creation with overridden index name
     column_name = "obj_order"
-    create_index(table_name, column_name, f"{table_name}_unique_idx", "unique")
+    create_index(table_name, column_name, f"{table_name}_unique_idx", index_op="unique")
     assert_index(db_metadata, table_name, column_name, index_name=f"{table_name}_unique_idx")
+
+    # Test spatial index creation
+    column_name = "test_geom"
+    create_index(table_name, column_name, index_op="spatial")
+    assert_index(db_metadata, table_name, column_name, index_name=f"{table_name}_{column_name}_spatial_idx")
 
     # Test json index creation (all ops)
     column_name = "test_json"
@@ -619,13 +646,13 @@ def test_create_index(db_metadata):
 
     # Test json index creation (path ops)
     column_name = "test_json"
-    create_index(table_name, column_name, f"{table_name}_json_path_idx", "json_path")
+    create_index(table_name, column_name, f"{table_name}_json_path_idx", index_op="json_path")
     assert_index(db_metadata, table_name, column_name, index_name=f"{table_name}_json_path_idx")
 
     # Test multi-column index creation on in-memory table
 
     # TSVECTOR indexes are not loaded from database via table reflection
-    create_index(test_table, SEARCHABLE_COLS, f"{table_name}_search_idx", "to_tsvector")
+    create_index(test_table, SEARCHABLE_COLS, f"{table_name}_search_idx", index_op="to_tsvector")
     assert_index(db_metadata, table_name, index_name=f"{table_name}_search_idx")
 
     # COALESCE indexes are not loaded from database via table reflection
@@ -1471,11 +1498,29 @@ def test_create_tsvector_column(db_metadata):
 
     # At least test SQL injection code
     with pytest.raises(ValueError, match="Invalid table name"):
-        create_tsvector_column(inject_sql, "searchable", ["obj_hash"], "tsvector_index")
+        create_tsvector_column(inject_sql, "searchable", ["obj_hash"])
     with pytest.raises(ValueError, match="Invalid column name"):
         create_tsvector_column(site_table, inject_sql, ["obj_hash"], "tsvector_index")
     with pytest.raises(ValueError, match="Invalid column names"):
         create_tsvector_column(site_table.name, "searchable", ["obj_hash", inject_sql], "tsvector_index")
+
+    # Test when column already exists
+
+    with pytest.raises(Exception):
+        create_tsvector_column(site_table.name, "site_addr", SEARCHABLE_COLS)
+
+    # Test column creation
+
+    col_name = "generated_search_col"
+    idx_name = "generated_tsvector_index"
+    create_tsvector_column(site_table.name, col_name, SEARCHABLE_COLS, index_name=idx_name)
+
+    newcol = refresh_metadata(db_metadata).tables[site_table.name].columns.get(col_name)
+    assert col_name == newcol.name
+    assert str(newcol.type).lower().startswith("tsvector")
+
+    # TSVECTOR indexes are not loaded from database via table reflection
+    assert_index(db_metadata, site_table.name, index_name=idx_name)
 
 
 def test_query_json_keys(db_metadata):

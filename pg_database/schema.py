@@ -1,5 +1,6 @@
 import logging
 
+from geoalchemy2.types import Geometry
 from sqlalchemy import column, create_engine, exc, literal_column, select, table, text, Column, Table
 from sqlalchemy.engine.url import URL
 from sqlalchemy.schema import AddConstraint, DropConstraint, ForeignKeyConstraint, Index, MetaData
@@ -245,7 +246,7 @@ def create_column(table_or_name, column_name, column_type, checkfirst=False, def
         conn.execute(text(create_sql).execution_options(autocommit=True))
 
 
-def create_tsvector_column(table_or_name, column_name, column_names, index_name):
+def create_tsvector_column(table_or_name, column_name, column_names, index_name=None):
     """
     Creates a single text tsvector column from a list of columns
     NOTE: compatible with PostgreSQL version 12.* and above
@@ -260,15 +261,16 @@ def create_tsvector_column(table_or_name, column_name, column_names, index_name)
 
     validate_sql_params(table=table_name, column=column_name, column_names=column_names)
 
-    if not isinstance(column_names, str):
-        column_names = ", ".join(column_names)
+    if isinstance(column_names, str):
+        column_names = [c.strip() for c in column_names.split(",")]
 
+    concatenated = "||' '||".join(column_names)
     generate_sql = "\n".join(
         (
             f"ALTER TABLE {table_name}",
             f"  ADD COLUMN {column_name} tsvector",
             "    GENERATED ALWAYS AS (",
-            f"      TO_TSVECTOR('english', CONCAT({column_names}))",
+            f"      TO_TSVECTOR('english', {concatenated})",
             "    ) STORED;",
         )
     )
@@ -322,6 +324,7 @@ def create_index(table_or_name, column_names, index_name=None, index_op=None):
     :param index_op: any SQL function available in Postgresql (using sqlalchemy.sql.func.*):
         * supported index types are:
             - coalesce:    CREATE INDEX <idx> ON <table> COALESCE(<col1>,<col2>,'');
+            - spatial  :   CREATE INDEX <idx> ON <table> USING GIST (<col>);
             - json_full:   CREATE INDEX <idx> ON <table> USING GIN (<col>);
             - json_path:   CREATE INDEX <idx> ON <table> USING GIN (<col> jsonb_path_ops);
             - to_tsvector: CREATE INDEX <idx> ON <table> USING GIN(to_tsvector('english', <col1>||' '||<col2>));
@@ -337,8 +340,11 @@ def create_index(table_or_name, column_names, index_name=None, index_op=None):
         column_names = [c.strip() for c in column_names.split(",")]
 
     validate_columns_in(table, column_names, empty_table=table_or_name, message="Invalid index column names")
-    if len(column_names) > 1 and (index_op or "").startswith("json"):
+    if len(column_names) > 1 and (index_op == "spatial" or (index_op or "").startswith("json")):
         raise ValueError(f"Invalid index operation for multiple columns: {index_op}")
+    elif index_op == "spatial" and not isinstance(table.columns[column_names[0]].type, Geometry):
+        column_type = str(table.columns[column_names[0]].type)
+        raise ValueError(f"Invalid column type for spatial index: {column_type}")
 
     if not index_name:
         column_index = "_".join(col for col in column_names)
@@ -354,6 +360,10 @@ def create_index(table_or_name, column_names, index_name=None, index_op=None):
     elif index_op == "coalesce":
         # Coalesce takes an indefinite list of column names and a default value
         expressions = (func.coalesce(*(column_names + [""])),)
+    elif index_op == "spatial":
+        # Generates CREATE INDEX <idx> ON <table> USING GIST (<col>);
+        index_kwargs["postgresql_using"] = "GIST"
+        expressions = (table.columns.get(column_names[0]),)
     elif index_op == "json_full":
         # Generates CREATE INDEX <idx> ON <table> USING GIN (<col>);
         index_kwargs["postgresql_using"] = "GIN"
