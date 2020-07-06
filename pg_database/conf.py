@@ -187,7 +187,7 @@ class PgDatabaseSettings(object):
             # Update configuration with values from Django config or defaults
             database_config = dict(self._database_config)
             database_config.update({
-                "database-engine": (django_database.get("ENGINE") or DEFAULT_ENGINE).split(".")[-1],
+                "database-engine": DEFAULT_ENGINE,
                 "database-host": django_database.get("HOST") or DEFAULT_HOST,
                 "database-port": django_database.get("PORT") or DEFAULT_PORT,
                 "database-name": django_database.get("NAME"),

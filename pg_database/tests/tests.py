@@ -491,7 +491,7 @@ def test_conf_settings_props():
 
     test_settings = PgDatabaseSettings()
 
-    django_engine = "django.db.backends.postgresql" if django_configured else None
+    django_engine = "django.contrib.gis.db.backends.postgis" if django_configured else None
     django_name = conf_name if django_configured else None
     django_port = None
     django_host = None
