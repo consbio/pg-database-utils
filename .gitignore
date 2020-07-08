@@ -4,5 +4,6 @@
 __pycache__/
 /build/
 /dist/
+/pg-database-utils.egg-info/
 /pg_database_utils.egg-info/
 /db.json

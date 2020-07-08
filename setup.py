@@ -22,12 +22,12 @@ with open("README.md") as readme:
 
 setup(
     url="https://github.com/consbio/pg-database-utils",
-    name="pg_database_utils",
+    name="pg-database-utils",
     description="A suite of utilities for PostgreSQL database queries and operations built on sqlalchemy",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    keywords="postgres,postgresql,utils,utilities,pg_database,sqlalchemy",
-    version="0.5",
+    keywords="postgres,postgresql,utils,utilities,pg_database,pg_database_utils,sqlalchemy",
+    version="0.5.1",
     license="BSD",
     packages=[
         "pg_database", "pg_database.tests"
