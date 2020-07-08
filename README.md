@@ -19,7 +19,7 @@ It also includes:
 ## Installation
 Install with:
 ```bash
-pip install pg_database_utils
+pip install pg-database-utils
 ```
 
 ## Configuration
