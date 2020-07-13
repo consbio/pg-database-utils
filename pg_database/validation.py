@@ -1,6 +1,6 @@
 import re
 
-SAFE_SQL_REGEX = re.compile(r"^[0-9A-Za-z_]{1,31}$")
+SAFE_SQL_REGEX = re.compile(r"^[0-9A-Za-z_]{1,63}$")
 SQL_TYPE_REGEX = re.compile(r"^[0-9A-Za-z_\(\),]+$")
 
 
