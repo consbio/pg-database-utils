@@ -1,4 +1,4 @@
 {
-    "missing-database-name": "no_database",
+    "missing-database-name": "database-name not present",
     "database-user": ""
 }

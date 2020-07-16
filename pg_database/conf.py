@@ -192,6 +192,9 @@ class PgDatabaseSettings(object):
             logger.debug("Applying Django database configuration")
 
             django_db_key = self._database_config.get("django-db-key") or "default"
+            if django_db_key not in django_databases:
+                raise EnvironmentError(f'No Django database configured for: "{django_db_key}"')
+
             django_database = {}.fromkeys(("ENGINE", "HOST", "PORT", "NAME", "USER", "PASSWORD"))
             django_database.update(django_databases[django_db_key])
 

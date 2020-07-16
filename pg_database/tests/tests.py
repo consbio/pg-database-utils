@@ -401,7 +401,7 @@ def test_conf_settings_dbinfo(db_settings):
         reload_django_settings(conf.settings)
         conf.PgDatabaseSettings().database_info
 
-    # Test with no db config and broken Django settings
+    # Test with no db config and empty Django settings
     os.environ[DJANGO_SETTINGS_VAR] = dj_env.replace("settings", "not_settings")
     with pytest.raises(EnvironmentError, match=no_config_message):
         reload_django_settings(conf.settings)
@@ -414,15 +414,40 @@ def test_conf_settings_dbinfo(db_settings):
         conf.PgDatabaseSettings().database_info
 
     # Test with invalid db config and Django settings
+    os.environ[DJANGO_SETTINGS_VAR] = dj_env.replace("settings", "invalid_settings")
     os.environ[ENVIRONMENT_VARIABLE] = db_env.replace("test_config", "invalid_config")
     with pytest.raises(EnvironmentError, match=config_key_message):
         reload_django_settings(conf.settings)
         conf.PgDatabaseSettings().database_info
 
+    if django_configured:
+        no_django_db_message = "No Django database configured for"
+
+        # Test with invalid Django database in config and valid Django settings
+        os.environ[DJANGO_SETTINGS_VAR] = dj_env
+        os.environ[ENVIRONMENT_VARIABLE] = db_env.replace("test_config", "missing_django_db")
+        with pytest.raises(EnvironmentError, match=no_django_db_message):
+            reload_django_settings(conf.settings)
+            conf.PgDatabaseSettings().database_info
+
+        # Test with valid Django database in config and missing Django database
+        os.environ[DJANGO_SETTINGS_VAR] = dj_env.replace("settings", "missing_django_db")
+        os.environ[ENVIRONMENT_VARIABLE] = db_env
+        with pytest.raises(EnvironmentError, match=no_django_db_message):
+            reload_django_settings(conf.settings)
+            conf.PgDatabaseSettings().database_info
+
+        # Test with invalid Django database in config and missing Django database
+        os.environ[DJANGO_SETTINGS_VAR] = dj_env.replace("settings", "missing_django_db")
+        os.environ[ENVIRONMENT_VARIABLE] = db_env.replace("test_config", "missing_django_db")
+        with pytest.raises(EnvironmentError, match=no_django_db_message):
+            reload_django_settings(conf.settings)
+            conf.PgDatabaseSettings().database_info
+
     # Test with valid db config and Django settings
 
+    os.environ[DJANGO_SETTINGS_VAR] = dj_env
     os.environ[ENVIRONMENT_VARIABLE] = db_env
-    os.environ["DJANGO_SETTINGS_MODULE"] = dj_env
     reload_django_settings(conf.settings)
 
 
