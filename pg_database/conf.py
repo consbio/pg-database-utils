@@ -27,6 +27,7 @@ DATABASE_PROPS = frozenset({
     "database_host", "host",
     "database_user", "user", "username",
     "database_password", "password",
+    "connect_args",
     # Supported django database properties
     "ENGINE", "django_engine",
     "NAME", "django_name",
@@ -34,6 +35,7 @@ DATABASE_PROPS = frozenset({
     "HOST", "django_host",
     "USER", "django_user",
     "PASSWORD", "django_password",
+    "OPTIONS", "django_options",
 })
 SUPPORTED_CONFIG = frozendict({
     # Required database configuration
@@ -46,7 +48,8 @@ SUPPORTED_CONFIG = frozendict({
     "database-password": None,
     # Optionally specify configured Django database
     "django-db-key": DEFAULT_DJANGO_DB,
-    # Other options:
+    # Other non-required options:
+    "connect-args": None,
     "date-format": DEFAULT_DATE_FORMAT,
     "timestamp-format": DEFAULT_TIMESTAMP_FORMAT,
 })
@@ -70,18 +73,26 @@ class PgDatabaseSettings(object):
         * If DATABASE_CONFIG_JSON specifies a django-db-key, then use that Django database
         * Otherwise use the keys defined in DATABASE_CONFIG_JSON
 
-    This is how database info is mapped between sources:
-        | config key        | django   | database_info | settings property |
-        |:------------------|:---------|:--------------|:------------------|
-        | database-engine   | ENGINE   | drivername    | database_engine   |
-        | database-host     | HOST     | host          | database_host     |
-        | database-port     | PORT     | port          | database_port     |
-        | database-name     | NAME     | database      | database_name     |
-        | database-user     | USER     | username      | database_user     |
-        | database-password | PASSWORD | password      | database_password |
+    This is how database connection info is mapped between sources:
+        | config key        | django   | database_info | settings property | default values |
+        |:------------------|:---------|:--------------|:------------------|:---------------|
+        | database-engine   | ENGINE   | drivername    | database_engine   | "postgresql"   |
+        | database-host     | HOST     | host          | database_host     | "127.0.0.1"    |
+        | database-port     | PORT     | port          | database_port     | 5432           |
+        | database-name     | NAME     | database      | database_name     | <required>     |
+        | database-user     | USER     | username      | database_user     | "postgres"     |
+        | database-password | PASSWORD | password      | database_password | None           |
+
+    This is how other database options are mapped:
+        | config key       | django   | settings property | default values      |
+        |:-----------------|:---------|:------------------|:--------------------|
+        | connect-args     | OPTIONS  | connect_args      | None                |
+        | django-db-key    | None     | django_db_key     | "default"           |
+        | date-format      | None     | date_format       | "%Y-%m-%d"          |
+        | timestamp-format | None     | timestamp_format  | "%Y-%m-%d %H:%M:%S" |
 
     Of the above, only database-name and database-user are required.
-    The others either have defaults or are not necessary for interaction with a database.
+    The others either have defaults or are not required for database connection.
     """
 
     empty = EMPTY
@@ -193,6 +204,7 @@ class PgDatabaseSettings(object):
                 "database-name": django_database.get("NAME"),
                 "database-user": django_database.get("USER"),
                 "database-password": django_database.get("PASSWORD"),
+                "connect-args": django_database.get("OPTIONS")
             })
 
             self._database_config = frozendict(database_config)
@@ -275,7 +287,7 @@ class PgDatabaseSettings(object):
                 if prop in self._django_database:
                     return (self._django_database or self.django_database)[prop]
 
-        # Finally check for any other configured properties (i.e. date_format)
+        # Finally check for any other configured properties (i.e. connect_args, date_format, Etc.)
 
         if "-" not in name:
             prop = name.replace("_", "-")

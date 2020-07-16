@@ -13,12 +13,27 @@ from .validation import validate_columns_in, validate_sql_params, SQL_TYPE_REGEX
 logger = logging.getLogger(__name__)
 
 
-def get_engine():
-    return create_engine(URL(**settings.database_info))
+def get_engine(connect_args=None):
+    """
+    Creates a sqlalchemy engine with settings configured in Django or database config
+    :param connect_args: optionally override configured settings with connection args
+    :return: a sqlalchemy connection engine
+    """
+
+    connect_args = connect_args or settings.connect_args
+    connect_kwargs = {"connect_args": connect_args} if connect_args else {}
+
+    return create_engine(URL(**settings.database_info), **connect_kwargs)
 
 
-def get_metadata():
-    metadata = MetaData(get_engine())
+def get_metadata(connect_args=None):
+    """
+    Instantiates sqlalchemy metadata with settings configured in Django or database config
+    :param connect_args: optionally override configured settings with connection args
+    :return: a sqlalchemy.sql.Metadata object
+    """
+
+    metadata = MetaData(get_engine(connect_args))
     metadata.reflect()
     return metadata
 

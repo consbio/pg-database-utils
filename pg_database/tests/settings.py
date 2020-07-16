@@ -17,10 +17,16 @@ SECRET_KEY = secrets.token_urlsafe(50)
 
 DATABASES = {
     "default": {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": CONFIG.get("database-name"),
+        "USER": "django",
+    },
+    "other": {
         "ENGINE": "django.contrib.gis.db.backends.postgis",
         "NAME": CONFIG.get("database-name"),
         "USER": "django",
-    }
+        "OPTIONS": {"sslmode": "allow"},
+    },
 }
 
 INSTALLED_APPS = [
