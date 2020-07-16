@@ -14,13 +14,9 @@ from sqlalchemy.sql import func, text, sqltypes
 from sqlalchemy.schema import AddConstraint, DropConstraint, ForeignKeyConstraint, MetaData
 
 from pg_database import conf
-from pg_database.conf import PgDatabaseSettings
-from pg_database.schema import create_foreign_key, create_column, create_index, create_table, create_tsvector_column
-from pg_database.schema import alter_column_type, drop_foreign_key, drop_column, drop_index, drop_table
-from pg_database.sql import query_tsvector_columns, query_json_keys
-from pg_database.schema import get_table, get_table_count, get_tables, has_index, table_exists
-from pg_database.sql import insert_from, insert_into, select_from, select_into, update_from, update_rows
-from pg_database.types import DATE_FORMAT, DATETIME_FORMAT
+from pg_database import schema
+from pg_database import sql
+from pg_database import types
 
 
 DJANGO_SETTINGS_VAR = conf.DJANGO_SETTINGS_VAR
@@ -85,7 +81,7 @@ SITE_TEST_DATA = [
         "site_json": {"number": "7350", "street": "STATE ST", "city": "ALBANY", "state": "NY"},
         "countyname": "Albany",
         "test_bool": 1,
-        "test_date": datetime.datetime.strptime("2020-02-02 00:00:00", DATETIME_FORMAT),
+        "test_date": datetime.datetime.strptime("2020-02-02 00:00:00", types.DATETIME_FORMAT),
         "test_json": {"data": [1, 2, 3]},
         "test_none": "null",
         "test_geom": None,
@@ -103,7 +99,7 @@ SITE_TEST_DATA = [
         "site_json": {"number": "7350", "street": "STATE ST", "city": "ALBANY", "state": "NY"},
         "countyname": "Albany",
         "test_bool": 0,
-        "test_date": datetime.datetime.strptime("2010-01-01", DATE_FORMAT),
+        "test_date": datetime.datetime.strptime("2010-01-01", types.DATE_FORMAT),
         "test_json": ["one", "two", "three"],
         "test_none": None,
         "test_geom": None,
@@ -121,7 +117,7 @@ SITE_TEST_DATA = [
         "site_json": {"number": "7350", "street": "STATE ST", "unit": "1100", "city": "ALBANY", "state": "NY"},
         "countyname": "Albany",
         "test_bool": 0.0,
-        "test_date": datetime.datetime.strptime("2020-01-02 00:00:00", DATETIME_FORMAT).date(),
+        "test_date": datetime.datetime.strptime("2020-01-02 00:00:00", types.DATETIME_FORMAT).date(),
         "test_json": [],
         "test_none": "",
         "test_geom": None,
@@ -139,7 +135,7 @@ SITE_TEST_DATA = [
         "site_json": {"number": "7450", "street": "STATE ST", "city": "ALBANY", "state": "NY"},
         "countyname": "Albany",
         "test_bool": 1.0,
-        "test_date": datetime.datetime.strptime("2010-02-02", DATE_FORMAT).date(),
+        "test_date": datetime.datetime.strptime("2010-02-02", types.DATE_FORMAT).date(),
         "test_json": {},
         "test_none": "[]",
         "test_geom": None,
@@ -264,7 +260,7 @@ def assert_records(meta, table_name, target_data, target_columns=None, target_co
         elif isinstance(val, datetime.datetime):
             return val.date()
         elif isinstance(val, str):
-            return datetime.datetime.strptime(val.split()[0], DATE_FORMAT).date()
+            return datetime.datetime.strptime(val.split()[0], types.DATE_FORMAT).date()
 
     test_table = refresh_metadata(meta).tables[table_name]
 
@@ -379,15 +375,15 @@ def test_conf_settings_init(db_settings):
 
     os.environ[ENVIRONMENT_VARIABLE] = db_env.replace("json", "txt")
     with pytest.raises(EnvironmentError, match="Invalid database configuration file"):
-        PgDatabaseSettings()
+        conf.PgDatabaseSettings()
 
     os.environ[ENVIRONMENT_VARIABLE] = db_env.replace("config", "nope")
     with pytest.raises(EnvironmentError, match="Database configuration file does not exist"):
-        PgDatabaseSettings()
+        conf.PgDatabaseSettings()
 
     os.environ[ENVIRONMENT_VARIABLE] = db_env.replace("test_config", "not")
     with pytest.raises(EnvironmentError, match="Database configuration file does not contain JSON"):
-        PgDatabaseSettings()
+        conf.PgDatabaseSettings()
 
 
 def test_conf_settings_dbinfo(db_settings):
@@ -403,25 +399,25 @@ def test_conf_settings_dbinfo(db_settings):
     # Test with no settings configured
     with pytest.raises(EnvironmentError, match=no_config_message):
         reload_django_settings(conf.settings)
-        PgDatabaseSettings().database_info
+        conf.PgDatabaseSettings().database_info
 
     # Test with no db config and broken Django settings
     os.environ[DJANGO_SETTINGS_VAR] = dj_env.replace("settings", "not_settings")
     with pytest.raises(EnvironmentError, match=no_config_message):
         reload_django_settings(conf.settings)
-        PgDatabaseSettings().database_info
+        conf.PgDatabaseSettings().database_info
 
     # Test with no db config and invalid Django settings
     os.environ[DJANGO_SETTINGS_VAR] = dj_env.replace("settings", "invalid_settings")
     with pytest.raises(EnvironmentError, match=invalid_dj_message):
         reload_django_settings(conf.settings)
-        PgDatabaseSettings().database_info
+        conf.PgDatabaseSettings().database_info
 
     # Test with invalid db config and Django settings
     os.environ[ENVIRONMENT_VARIABLE] = db_env.replace("test_config", "invalid_config")
     with pytest.raises(EnvironmentError, match=config_key_message):
         reload_django_settings(conf.settings)
-        PgDatabaseSettings().database_info
+        conf.PgDatabaseSettings().database_info
 
     # Test with valid db config and Django settings
 
@@ -437,15 +433,16 @@ def test_conf_settings_props():
 
     # Test non-database properties
 
-    test_settings = PgDatabaseSettings()
+    test_settings = conf.PgDatabaseSettings()
 
-    assert test_settings.django_db_key == "default"
+    assert test_settings.connect_args == {"sslmode": "allow" if django_configured else "prefer"}
+    assert test_settings.django_db_key == "other"
     assert test_settings.date_format == DEFAULT_DATE_FORMAT
     assert test_settings.timestamp_format == DEFAULT_TIMESTAMP_FORMAT
 
     # Test database info dict
 
-    test_settings = PgDatabaseSettings()
+    test_settings = conf.PgDatabaseSettings()
 
     conf_engine = DEFAULT_ENGINE
     conf_name = "pg_database"
@@ -463,7 +460,7 @@ def test_conf_settings_props():
 
     # Test top-level database properties
 
-    test_settings = PgDatabaseSettings()
+    test_settings = conf.PgDatabaseSettings()
 
     for prop in ("database_engine", "engine", "drivername"):
         assert getattr(test_settings, prop) == conf_engine
@@ -489,7 +486,7 @@ def test_conf_settings_props():
 
     # Test django database dict
 
-    test_settings = PgDatabaseSettings()
+    test_settings = conf.PgDatabaseSettings()
 
     django_engine = "django.contrib.gis.db.backends.postgis" if django_configured else None
     django_name = conf_name if django_configured else None
@@ -497,6 +494,7 @@ def test_conf_settings_props():
     django_host = None
     django_user = "django" if django_configured else None
     django_pass = None
+    django_options = {"sslmode": "allow"} if django_configured else None
 
     if not django_configured:
         assert test_settings.django_database == {}
@@ -507,7 +505,7 @@ def test_conf_settings_props():
 
     # Test django-specific database properties
 
-    test_settings = PgDatabaseSettings()
+    test_settings = conf.PgDatabaseSettings()
 
     for prop in ("ENGINE", "django_engine"):
         assert getattr(test_settings, prop) == django_engine
@@ -521,6 +519,8 @@ def test_conf_settings_props():
         assert getattr(test_settings, prop) == django_user
     for prop in ("PASSWORD", "django_password"):
         assert getattr(test_settings, prop) == django_pass
+    for prop in ("OPTIONS", "django_options"):
+        assert getattr(test_settings, prop) == django_options
 
     # Test invalid django-specific database properties
 
@@ -639,70 +639,70 @@ def test_create_index(db_metadata):
     # Test with invalid parameters
 
     with pytest.raises(ValueError, match="No table named"):
-        create_index("nope", "site_addr")
+        schema.create_index("nope", "site_addr")
     with pytest.raises(ValueError, match="Invalid index column names"):
-        create_index(table_name, [])
+        schema.create_index(table_name, [])
     with pytest.raises(ValueError, match="Invalid index column names"):
-        create_index(table_name, ["site_addr", "nope"])
+        schema.create_index(table_name, ["site_addr", "nope"])
     with pytest.raises(ValueError, match="Invalid index column names"):
-        create_index(table_name, ["site_addr", inject_sql])
+        schema.create_index(table_name, ["site_addr", inject_sql])
     with pytest.raises(ValueError, match="Invalid index operation for multiple columns"):
-        create_index(table_name, "test_json,test_none", None, "json_full")
+        schema.create_index(table_name, "test_json,test_none", None, "json_full")
     with pytest.raises(ValueError, match="Invalid index operation for multiple columns"):
-        create_index(table_name, "test_json,test_none", None, "json_path")
+        schema.create_index(table_name, "test_json,test_none", None, "json_path")
     with pytest.raises(ValueError, match="Invalid index operation for multiple columns"):
-        create_index(table_name, "site_addr,test_none", None, "spatial")
+        schema.create_index(table_name, "site_addr,test_none", None, "spatial")
     with pytest.raises(ValueError, match="Invalid column type for spatial index"):
-        create_index(table_name, "site_addr", None, "spatial")
+        schema.create_index(table_name, "site_addr", None, "spatial")
     with pytest.raises(ValueError, match="Unsupported index type"):
-        create_index(table_name, "site_addr", None, "nope")
+        schema.create_index(table_name, "site_addr", None, "nope")
 
     # Test default index creation
     column_name = "site_addr"
-    create_index(table_name, column_name)
+    schema.create_index(table_name, column_name)
     assert_index(db_metadata, table_name, column_name, index_name=f"{table_name}_{column_name}_idx")
 
     # Test unique index creation with overridden index name
     column_name = "obj_order"
-    create_index(table_name, column_name, f"{table_name}_unique_idx", index_op="unique")
+    schema.create_index(table_name, column_name, f"{table_name}_unique_idx", index_op="unique")
     assert_index(db_metadata, table_name, column_name, index_name=f"{table_name}_unique_idx")
 
     # Test spatial index creation on point column
     column_name = "test_geom"
-    create_index(table_name, column_name, index_op="spatial")
+    schema.create_index(table_name, column_name, index_op="spatial")
     assert_index(db_metadata, table_name, column_name, index_name=f"{table_name}_{column_name}_spatial_idx")
 
     # Test spatial index creation on line column
     column_name = "test_line"
-    create_index(table_name, column_name, index_op="spatial")
+    schema.create_index(table_name, column_name, index_op="spatial")
     assert_index(db_metadata, table_name, column_name, index_name=f"{table_name}_{column_name}_spatial_idx")
 
     # Test spatial index creation on polygon column
     column_name = "test_poly"
-    create_index(table_name, column_name, index_op="spatial")
+    schema.create_index(table_name, column_name, index_op="spatial")
     assert_index(db_metadata, table_name, column_name, index_name=f"{table_name}_{column_name}_spatial_idx")
 
     # Test json index creation (all ops)
     column_name = "test_json"
-    create_index(table_name, column_name, index_op="json_full")
+    schema.create_index(table_name, column_name, index_op="json_full")
     assert_index(db_metadata, table_name, column_name, index_name=f"{table_name}_{column_name}_json_full_idx")
 
     # Test json index creation (path ops)
     column_name = "test_json"
-    create_index(table_name, column_name, f"{table_name}_json_path_idx", index_op="json_path")
+    schema.create_index(table_name, column_name, f"{table_name}_json_path_idx", index_op="json_path")
     assert_index(db_metadata, table_name, column_name, index_name=f"{table_name}_json_path_idx")
 
     # Test multi-column index creation on in-memory table
 
     # TSVECTOR indexes are not loaded from database via table reflection
-    create_index(test_table, SEARCHABLE_COLS, f"{table_name}_search_idx", index_op="to_tsvector")
+    schema.create_index(test_table, SEARCHABLE_COLS, f"{table_name}_search_idx", index_op="to_tsvector")
     assert_index(db_metadata, table_name, index_name=f"{table_name}_search_idx")
 
     # COALESCE indexes are not loaded from database via table reflection
     column_names = [c for c in SEARCHABLE_COLS if c.startswith("site")]
     index_cols = "_".join(col for col in column_names)
     index_name = f"{table_name}_{index_cols}_coalesce_idx"
-    create_index(test_table, column_names, index_op="coalesce")
+    schema.create_index(test_table, column_names, index_op="coalesce")
     assert_index(db_metadata, table_name, index_name=index_name)
 
 
@@ -713,25 +713,25 @@ def test_drop_index(db_metadata):
     # Test with invalid parameters
 
     # Should raise no errors
-    drop_index("nope", column_names="site_addr", ignore_errors=True)
-    drop_index(table_name, ignore_errors=True)
-    drop_index(table_name, index_name="nope", ignore_errors=True)
+    schema.drop_index("nope", column_names="site_addr", ignore_errors=True)
+    schema.drop_index(table_name, ignore_errors=True)
+    schema.drop_index(table_name, index_name="nope", ignore_errors=True)
 
     with pytest.raises(ValueError, match="No table named"):
-        drop_index("nope", column_names="site_addr", ignore_errors=False)
+        schema.drop_index("nope", column_names="site_addr", ignore_errors=False)
     with pytest.raises(ValueError, match="No index name provided"):
-        drop_index(table_name, ignore_errors=False)
+        schema.drop_index(table_name, ignore_errors=False)
     with pytest.raises(Exception):
-        drop_index(table_name, index_name="nope", ignore_errors=False)
+        schema.drop_index(table_name, index_name="nope", ignore_errors=False)
 
     # Test removing APN index created during setup
     index_name = "order_index"
-    drop_index(test_table, index_name, ignore_errors=False)
+    schema.drop_index(test_table, index_name, ignore_errors=False)
     assert_index(db_metadata, table_name, index_name=index_name, exists=False)
 
     # Test removing search index created during setup
     index_name = "tsvector_index"
-    drop_index(table_name, index_name, ignore_errors=False)
+    schema.drop_index(table_name, index_name, ignore_errors=False)
     assert_index(db_metadata, table_name, index_name=index_name, exists=False)
 
     # Test removing indexes by column name
@@ -740,12 +740,12 @@ def test_drop_index(db_metadata):
 
     Index(pk_index, "pk", unique=True, _table=test_table).create()
     assert_index(db_metadata, table_name, index_name=pk_index)
-    drop_index(table_name, column_names="obj_index,obj_hash", ignore_errors=False)
+    schema.drop_index(table_name, column_names="obj_index,obj_hash", ignore_errors=False)
     assert_index(db_metadata, table_name, index_name=pk_index, exists=False)
 
     Index(pk_index, "pk", unique=True, _table=test_table).create()
     assert_index(db_metadata, table_name, index_name=pk_index)
-    drop_index(table_name, column_names=["obj_index", "obj_hash"], ignore_errors=False)
+    schema.drop_index(table_name, column_names=["obj_index", "obj_hash"], ignore_errors=False)
     assert_index(db_metadata, table_name, index_name=pk_index, exists=False)
 
 
@@ -754,16 +754,16 @@ def test_has_index(db_metadata):
     test_table = db_metadata.tables[table_name]
 
     # Test indexes created during setup
-    assert has_index(test_table, index_name="order_index")
-    assert has_index(table_name, index_name="tsvector_index")
+    assert schema.has_index(test_table, index_name="order_index")
+    assert schema.has_index(table_name, index_name="tsvector_index")
 
     # Test that indexes no longer exist after being dropped
 
     Index("order_index", _table=test_table).drop()
     Index("tsvector_index", _table=test_table).drop()
 
-    assert not has_index(test_table, index_name="order_index")
-    assert not has_index(table_name, index_name="tsvector_index")
+    assert not schema.has_index(test_table, index_name="order_index")
+    assert not schema.has_index(table_name, index_name="tsvector_index")
 
 
 def test_create_table(db_metadata):
@@ -777,24 +777,26 @@ def test_create_table(db_metadata):
 
     # Test invalid table names
     with pytest.raises(ValueError, match="No table name specified"):
-        create_table(None, col="string")
+        schema.create_table(None, col="string")
     with pytest.raises(ValueError, match="Invalid table name"):
-        create_table(inject_sql, column_one="string")
+        schema.create_table(inject_sql, column_one="string")
     with pytest.raises(ValueError, match="Table already exists"):
-        create_table(table_name, dropfirst=False, **SITE_COL_TYPES)
+        schema.create_table(table_name, dropfirst=False, **SITE_COL_TYPES)
     # Test invalid index columns
     with pytest.raises(ValueError, match="No column names specified"):
-        create_table("no_columns")
+        schema.create_table("no_columns")
     with pytest.raises(ValueError, match="Invalid index column names"):
-        create_table(tmp_table_name, index_cols="col,nope", col="string", dropfirst=True)
+        schema.create_table(tmp_table_name, index_cols="col,nope", col="string", dropfirst=True)
     with pytest.raises(ValueError, match="Invalid index column names"):
-        create_table(tmp_table_name, index_cols=["col", "nope"], col="string", dropfirst=True)
+        schema.create_table(tmp_table_name, index_cols=["col", "nope"], col="string", dropfirst=True)
     with pytest.raises(ValueError, match="Invalid index column names"):
-        create_table(tmp_table_name, index_cols={"col": "unique", "nope": "unique"}, col="string", dropfirst=True)
+        schema.create_table(
+            tmp_table_name, index_cols={"col": "unique", "nope": "unique"}, col="string", dropfirst=True
+        )
 
     # Test with string of index columns
 
-    create_table(
+    schema.create_table(
         table_name,
         index_cols="pk,obj_order",
         dropfirst=True,
@@ -807,7 +809,7 @@ def test_create_table(db_metadata):
 
     refresh_metadata(db_metadata).tables[table_name].drop()
 
-    create_table(
+    schema.create_table(
         table_name,
         index_cols=["pk", "obj_order"],
         dropfirst=False,
@@ -821,7 +823,7 @@ def test_create_table(db_metadata):
 
     refresh_metadata(db_metadata).tables[table_name].drop()
 
-    create_table(
+    schema.create_table(
         table_name,
         index_cols={"pk": "unique", "obj_order": "unique", "pk,obj_order": "unique"},
         dropfirst=False,
@@ -837,21 +839,41 @@ def test_drop_table(db_metadata):
 
     site_table = db_metadata.tables[SITE_TABLE_NAME]
 
-    drop_table(SITE_TABLE_NAME)
+    schema.drop_table(SITE_TABLE_NAME)
     assert SITE_TABLE_NAME not in refresh_metadata(db_metadata).tables
 
     # Should raise no errors
-    drop_table(site_table)
-    drop_table(site_table.name)
+    schema.drop_table(site_table)
+    schema.drop_table(site_table.name)
+
+
+def test_get_engine(db_metadata):
+
+    test_metadata = MetaData(schema.get_engine())
+    test_metadata.reflect()
+    assert sorted(test_metadata.tables) == sorted(db_metadata.tables)
+
+    test_metadata = MetaData(schema.get_engine(connect_args={"sslmode": "require"}))
+    test_metadata.reflect()
+    assert sorted(test_metadata.tables) == sorted(db_metadata.tables)
+
+
+def test_get_metadata(db_metadata):
+
+    test_metadata = schema.get_metadata()
+    assert sorted(test_metadata.tables) == sorted(db_metadata.tables)
+
+    test_metadata = schema.get_metadata(connect_args={"sslmode": "require"})
+    assert sorted(test_metadata.tables) == sorted(db_metadata.tables)
 
 
 def test_get_table(db_metadata):
 
     with pytest.raises(ValueError, match="No table named"):
-        get_table("nope")
+        schema.get_table("nope")
 
     # Test for existance of custom table
-    assert get_table(SITE_TABLE_NAME).exists
+    assert schema.get_table(SITE_TABLE_NAME).exists
 
 
 def test_get_table_count(db_metadata):
@@ -859,17 +881,17 @@ def test_get_table_count(db_metadata):
     target_count = len(SITE_TEST_DATA)
 
     with pytest.raises(ValueError, match="No table named"):
-        get_table_count("nope")
+        schema.get_table_count("nope")
 
     # Test count for initialized data
 
-    assert get_table_count(SITE_TABLE_NAME) == target_count
-    assert get_table_count(db_metadata.tables[SITE_TABLE_NAME]) == target_count
+    assert schema.get_table_count(SITE_TABLE_NAME) == target_count
+    assert schema.get_table_count(db_metadata.tables[SITE_TABLE_NAME]) == target_count
 
 
 def test_get_tables(db_metadata):
 
-    all_tables = get_tables()
+    all_tables = schema.get_tables()
     table_name = SITE_TABLE_NAME
 
     # Test for existance of custom table
@@ -878,7 +900,7 @@ def test_get_tables(db_metadata):
 
     # Test for existance of tables specified as string
 
-    some_tables = get_tables(f"{table_name},nope")
+    some_tables = schema.get_tables(f"{table_name},nope")
 
     assert len(some_tables) == 1
     assert table_name in some_tables
@@ -893,21 +915,21 @@ def test_insert_from(db_metadata):
     # Test with invalid parameters
 
     with pytest.raises(ValueError, match="No table named"):
-        insert_from("nope", SITE_TABLE_NAME, "*")
+        sql.insert_from("nope", SITE_TABLE_NAME, "*")
     with pytest.raises(ValueError, match="No table named"):
-        insert_from(from_table_name, "nope", "*")
+        sql.insert_from(from_table_name, "nope", "*")
     with pytest.raises(ValueError, match="Join columns missing in.*table"):
-        insert_from(from_table_name, SITE_TABLE_NAME, "*", join_columns="nope")
+        sql.insert_from(from_table_name, SITE_TABLE_NAME, "*", join_columns="nope")
 
     # Test with asterisk to insert all columns
 
     # Test that table is created with all columns if it doesn't exist
-    insert_from(from_table_name, into_table_name, "*", create_if_not_exists=True)
+    sql.insert_from(from_table_name, into_table_name, "*", create_if_not_exists=True)
     assert_table(db_metadata, into_table_name, SITE_TABLE_COLS)
     assert_records(db_metadata, into_table_name, SITE_DATA_DICT)
 
     # Test that table is updated with new records if it does
-    insert_from(from_table_name, into_table_name, "*", create_if_not_exists=False)
+    sql.insert_from(from_table_name, into_table_name, "*", create_if_not_exists=False)
     assert_records(db_metadata, into_table_name, SITE_DATA_DICT, target_count=(len(SITE_TEST_DATA) * 2))
 
     # Test with subset of columns
@@ -917,28 +939,28 @@ def test_insert_from(db_metadata):
     refresh_metadata(db_metadata).tables[into_table_name].drop()
 
     # Test that table is not created when only invalid column names are provided
-    insert_from(from_table_name, into_table_name, "ignore,these", create_if_not_exists=True)
+    sql.insert_from(from_table_name, into_table_name, "ignore,these", create_if_not_exists=True)
     assert into_table_name not in refresh_metadata(db_metadata).tables
 
     # Test that table is created with subset of columns if it doesn't exist
-    insert_from(from_table_name, into_table_name, target_columns, create_if_not_exists=True)
+    sql.insert_from(from_table_name, into_table_name, target_columns, create_if_not_exists=True)
     assert_table(db_metadata, into_table_name, target_columns)
     assert_records(db_metadata, into_table_name, SITE_DATA_DICT)
 
     # Test that table has no new records when only invalid column names are provided
-    insert_from(from_table_name, into_table_name, "ignore,these")
+    sql.insert_from(from_table_name, into_table_name, "ignore,these")
     assert_table(db_metadata, into_table_name, target_columns)
     assert_records(db_metadata, into_table_name, SITE_DATA_DICT)
 
     # Test that existing table is updated with new records, ignoring two invalid columns
     target_count = len(SITE_DATA_DICT) * 2
-    insert_from(from_table_name, into_table_name, target_columns + ("ignore", "these"))
+    sql.insert_from(from_table_name, into_table_name, target_columns + ("ignore", "these"))
     assert_records(db_metadata, into_table_name, SITE_DATA_DICT, target_count=target_count)
 
     # Test that table is not affected by duplicate records
     into_table = refresh_metadata(db_metadata).tables[into_table_name]
     target_count = select([func.count()]).select_from(into_table).scalar()
-    insert_from(from_table_name, into_table_name, target_columns, join_columns=["pk", "obj_order", "obj_hash"])
+    sql.insert_from(from_table_name, into_table_name, target_columns, join_columns=["pk", "obj_order", "obj_hash"])
     assert_records(db_metadata, into_table_name, SITE_DATA_DICT, target_count=target_count)
 
 
@@ -952,19 +974,19 @@ def test_insert_into(db_metadata):
     make_table(db_metadata, into_table_name, target_cols)
 
     with pytest.raises(ValueError, match="No table named"):
-        insert_into("nope", [("one",), ("two",), ("three",)], "str")
+        sql.insert_into("nope", [("one",), ("two",), ("three",)], "str")
     with pytest.raises(ValueError, match="Invalid column names"):
-        insert_into(into_table_name, [("one",), ("two",), ("three",)], "no,nope,wrong")
+        sql.insert_into(into_table_name, [("one",), ("two",), ("three",)], "no,nope,wrong")
 
     with pytest.raises(ValueError, match="Values provided do not match columns"):
-        insert_into(into_table_name, [("one", "two"), ("three",), ("four",)], "str")
+        sql.insert_into(into_table_name, [("one", "two"), ("three",), ("four",)], "str")
     with pytest.raises(ValueError, match="Values provided do not match columns"):
-        insert_into(into_table_name, [("one",), ("two", "three"), ("four",)], "str")
+        sql.insert_into(into_table_name, [("one",), ("two", "three"), ("four",)], "str")
     with pytest.raises(ValueError, match="Values provided do not match columns"):
-        insert_into(into_table_name, ["one", ("two",), ("three", "four")], "str")
+        sql.insert_into(into_table_name, ["one", ("two",), ("three", "four")], "str")
 
     # Test with empty values (logs warning and exits)
-    insert_into(into_table_name, [], "str")
+    sql.insert_into(into_table_name, [], "str")
 
     # Cleanup in preparation for data tests
     refresh_metadata(db_metadata).tables[into_table_name].drop()
@@ -986,7 +1008,7 @@ def test_insert_into(db_metadata):
 
     # Test insert with new table and no types specified
 
-    insert_into(into_table_name, insert_vals, target_cols, create_if_not_exists=True)
+    sql.insert_into(into_table_name, insert_vals, target_cols, create_if_not_exists=True)
     assert_table(db_metadata, into_table_name, target_cols)
     assert_records(db_metadata, into_table_name, target_data, target_cols)
 
@@ -995,7 +1017,7 @@ def test_insert_into(db_metadata):
 
     # Test insert duplicate records into existing table
 
-    insert_into(into_table_name, insert_vals, target_cols)
+    sql.insert_into(into_table_name, insert_vals, target_cols)
     target_count = len(target_vals) * 2
     assert_table(db_metadata, into_table_name, target_cols)
     assert_records(db_metadata, into_table_name, target_data, target_cols, target_count)
@@ -1009,16 +1031,16 @@ def test_select_from(db_metadata):
     # Test with invalid parameters
 
     with pytest.raises(ValueError, match="No table named"):
-        select_from("nope", into_table_name, "*")
+        sql.select_from("nope", into_table_name, "*")
     with pytest.raises(ValueError, match="Table.*already exists"):
-        select_from(from_table_name, SITE_TABLE_NAME, "*")
+        sql.select_from(from_table_name, SITE_TABLE_NAME, "*")
 
     # Test with invalid columns
-    select_from(from_table_name, into_table_name, "ignore,these")
+    sql.select_from(from_table_name, into_table_name, "ignore,these")
     assert into_table_name not in refresh_metadata(db_metadata).tables
 
     # Test with asterisk to insert all columns
-    select_from(from_table_name, into_table_name, "*")
+    sql.select_from(from_table_name, into_table_name, "*")
     assert_table(db_metadata, into_table_name, SITE_TABLE_COLS)
     assert_records(db_metadata, into_table_name, SITE_DATA_DICT)
 
@@ -1028,7 +1050,7 @@ def test_select_from(db_metadata):
 
     refresh_metadata(db_metadata).tables[into_table_name].drop()
 
-    select_from(from_table_name, into_table_name, target_columns + ("ignore", "these"))
+    sql.select_from(from_table_name, into_table_name, target_columns + ("ignore", "these"))
     assert_table(db_metadata, into_table_name, target_columns)
     assert_records(db_metadata, into_table_name, SITE_DATA_DICT, target_columns=target_columns)
 
@@ -1042,23 +1064,23 @@ def test_select_into(db_metadata):
     inject_sql = "DROP USER 'postgres' IF EXISTS"
 
     with pytest.raises(ValueError, match="Table.*already exists"):
-        select_into(SITE_TABLE_NAME, [("one",), ("two",), ("three",)], "val")
+        sql.select_into(SITE_TABLE_NAME, [("one",), ("two",), ("three",)], "val")
     with pytest.raises(ValueError, match="No columns to select"):
-        select_into(into_table_name, [("one",), ("two",), ("three",)], "")
+        sql.select_into(into_table_name, [("one",), ("two",), ("three",)], "")
     with pytest.raises(ValueError, match="Invalid column names"):
-        select_into(into_table_name, [("one",), ("two",), ("three",)], inject_sql)
+        sql.select_into(into_table_name, [("one",), ("two",), ("three",)], inject_sql)
     with pytest.raises(ValueError, match="Column types provided do not match columns"):
-        select_into(into_table_name, [("one",), ("two",), ("three",)], "val", "bool,json")
+        sql.select_into(into_table_name, [("one",), ("two",), ("three",)], "val", "bool,json")
 
     with pytest.raises(ValueError, match="Values provided do not match columns"):
-        select_into(into_table_name, [("one", "two"), ("three",), ("four",)], "val")
+        sql.select_into(into_table_name, [("one", "two"), ("three",), ("four",)], "val")
     with pytest.raises(ValueError, match="Values provided do not match columns"):
-        select_into(into_table_name, [("one",), ("two", "three"), ("four",)], "val")
+        sql.select_into(into_table_name, [("one",), ("two", "three"), ("four",)], "val")
     with pytest.raises(ValueError, match="Values provided do not match columns"):
-        select_into(into_table_name, ["one", ("two",), ("three", "four")], "val")
+        sql.select_into(into_table_name, ["one", ("two",), ("three", "four")], "val")
 
     # Test with empty values (logs warning and exits)
-    select_into(into_table_name, [], "val")
+    sql.select_into(into_table_name, [], "val")
 
     # Prepare target data for insert
 
@@ -1084,7 +1106,7 @@ def test_select_into(db_metadata):
 
     # Test insert with no types specified (
 
-    select_into(into_table_name, insert_vals, ",".join(target_cols))
+    sql.select_into(into_table_name, insert_vals, ",".join(target_cols))
     assert_table(db_metadata, into_table_name, target_cols)
     assert_records(db_metadata, into_table_name, target_data, target_cols)
 
@@ -1097,7 +1119,7 @@ def test_select_into(db_metadata):
 
     target_data = {p["pk"]: p for p in SITE_TEST_DATA}
 
-    select_into(into_table_name, insert_vals, target_cols, insert_types)
+    sql.select_into(into_table_name, insert_vals, target_cols, insert_types)
     assert_table(db_metadata, into_table_name, target_cols)
     assert_records(db_metadata, into_table_name, target_data, target_cols)
 
@@ -1113,13 +1135,13 @@ def test_update_from(db_metadata):
     # Test with invalid parameters
 
     with pytest.raises(ValueError, match="No table named"):
-        update_from("nope", SITE_TABLE_NAME, "pk")
+        sql.update_from("nope", SITE_TABLE_NAME, "pk")
     with pytest.raises(ValueError, match="No table named"):
-        update_from(from_table_name, "nope", "pk")
+        sql.update_from(from_table_name, "nope", "pk")
     with pytest.raises(ValueError, match="Join columns missing"):
-        update_from(from_table_name, SITE_TABLE_NAME, "")
+        sql.update_from(from_table_name, SITE_TABLE_NAME, "")
     with pytest.raises(ValueError, match="Join columns missing"):
-        update_from(from_table_name, SITE_TABLE_NAME, ["site_addr", "nope"])
+        sql.update_from(from_table_name, SITE_TABLE_NAME, ["site_addr", "nope"])
 
     # Create and populate a table with mangled data for testing updates
 
@@ -1140,7 +1162,7 @@ def test_update_from(db_metadata):
     assert_records(db_metadata, into_table_name, test_data)
 
     # Test that all records are updated by join on target columns
-    update_from(from_table_name, into_table_name, ",".join(join_cols))
+    sql.update_from(from_table_name, into_table_name, ",".join(join_cols))
     assert_records(db_metadata, into_table_name, orig_data)
 
     # Reset the updated table to mangled values for next test
@@ -1148,7 +1170,7 @@ def test_update_from(db_metadata):
     assert_records(db_metadata, into_table_name, test_data)
 
     # Test that no records are updated when only invalid column names are provided
-    update_from(from_table_name, into_table_name, join_cols, "ignore,these")
+    sql.update_from(from_table_name, into_table_name, join_cols, "ignore,these")
     assert_records(db_metadata, into_table_name, test_data)
 
     # Test that only select fields are updated by join on target columns, and invalid columns are ignored
@@ -1156,7 +1178,7 @@ def test_update_from(db_metadata):
     update_cols = set(c for c in SITE_TABLE_COLS if c.startswith("site"))
     ignore_cols = set(SITE_TABLE_COLS).difference(update_cols)
 
-    update_from(from_table_name, into_table_name, join_cols, update_cols.union(("ignore", "these")))
+    sql.update_from(from_table_name, into_table_name, join_cols, update_cols.union(("ignore", "these")))
     assert_records(db_metadata, into_table_name, orig_data, target_columns=update_cols)
     assert_records(db_metadata, into_table_name, test_data, target_columns=ignore_cols)
 
@@ -1194,27 +1216,27 @@ def test_update_rows(db_metadata):
     # Test with invalid parameters
 
     with pytest.raises(ValueError, match="No table named"):
-        update_rows("nope", "pk", "site_addr", update_zips)
+        sql.update_rows("nope", "pk", "site_addr", update_zips)
     with pytest.raises(ValueError, match="Join columns missing"):
-        update_rows(SITE_TABLE_NAME, "", "site_addr", update_zips)
+        sql.update_rows(SITE_TABLE_NAME, "", "site_addr", update_zips)
     with pytest.raises(ValueError, match="Target columns missing"):
-        update_rows(SITE_TABLE_NAME, "pk", "", update_zips)
+        sql.update_rows(SITE_TABLE_NAME, "pk", "", update_zips)
     with pytest.raises(ValueError, match="Invalid update function"):
-        update_rows(SITE_TABLE_NAME, "pk", "site_addr", None, 0)
+        sql.update_rows(SITE_TABLE_NAME, "pk", "site_addr", None, 0)
     with pytest.raises(ValueError, match="Invalid batch size"):
-        update_rows(SITE_TABLE_NAME, "pk", "site_addr", update_zips, 0)
+        sql.update_rows(SITE_TABLE_NAME, "pk", "site_addr", update_zips, 0)
 
     with pytest.raises(ValueError, match="Join columns missing in.*table"):
-        update_rows(SITE_TABLE_NAME, "pk,nope", "site_addr", update_zips)
+        sql.update_rows(SITE_TABLE_NAME, "pk,nope", "site_addr", update_zips)
     with pytest.raises(ValueError, match="Target columns missing in.*table"):
-        update_rows(SITE_TABLE_NAME, "pk", ["site_addr", "nope"], update_zips)
+        sql.update_rows(SITE_TABLE_NAME, "pk", ["site_addr", "nope"], update_zips)
 
     target_cols = ("site_zip", "site_zip_num", "site_json")
 
     # Test when there are no rows to update
 
     make_table(db_metadata, empty_table_name, SITE_TABLE_COLS)
-    update_rows(empty_table_name, "pk", SITE_TABLE_COLS, update_zips)
+    sql.update_rows(empty_table_name, "pk", SITE_TABLE_COLS, update_zips)
 
     # Prepare a fully populated table
 
@@ -1232,7 +1254,7 @@ def test_update_rows(db_metadata):
 
     # Test updating all the rows in data table
 
-    update_rows(test_table_name, "pk", target_cols, update_zips, batch_size=3)
+    sql.update_rows(test_table_name, "pk", target_cols, update_zips, batch_size=3)
 
     target_data = {}
     for pk, record in copy.deepcopy(test_data).items():
@@ -1247,7 +1269,7 @@ def test_update_rows(db_metadata):
 
     # Test updating some the rows depending on address
 
-    update_rows(test_table_name, "pk", target_cols, update_some, batch_size=3)
+    sql.update_rows(test_table_name, "pk", target_cols, update_some, batch_size=3)
 
     test_data = target_data
     target_data = {}
@@ -1263,7 +1285,7 @@ def test_update_rows(db_metadata):
 
     # Test updating none of the rows in the data table
 
-    update_rows(test_table_name, "pk", target_cols, update_none, batch_size=3)
+    sql.update_rows(test_table_name, "pk", target_cols, update_none, batch_size=3)
 
     assert_records(db_metadata, test_table_name, target_data, target_cols)
     assert f"tmp_{test_table_name}" not in refresh_metadata(db_metadata).tables
@@ -1275,11 +1297,11 @@ def test_table_exists(db_metadata):
 
     # Test all tables present in database
     for table_name in existing:
-        assert table_exists(existing.get(table_name))
-        assert table_exists(table_name)
+        assert schema.table_exists(existing.get(table_name))
+        assert schema.table_exists(table_name)
 
-    assert not table_exists(None)
-    assert not table_exists("nope")
+    assert not schema.table_exists(None)
+    assert not schema.table_exists("nope")
 
 
 def test_create_foreign_key(db_metadata):
@@ -1290,11 +1312,11 @@ def test_create_foreign_key(db_metadata):
     # Test with invalid parameters
 
     with pytest.raises(ValueError, match="No table named"):
-        create_foreign_key("nope", "pk", f"{site_table.name}.obj_order")
+        schema.create_foreign_key("nope", "pk", f"{site_table.name}.obj_order")
     with pytest.raises(ValueError, match="Invalid column names"):
-        create_foreign_key(site_table.name, "nope", f"{site_table.name}.obj_order")
+        schema.create_foreign_key(site_table.name, "nope", f"{site_table.name}.obj_order")
     with pytest.raises(ValueError, match="No related column named"):
-        create_foreign_key(site_table.name, "pk", f"{site_table.name}.nope")
+        schema.create_foreign_key(site_table.name, "pk", f"{site_table.name}.nope")
 
     test_columns = ("pk", "obj_order", "obj_hash", "test_bool")
 
@@ -1306,13 +1328,13 @@ def test_create_foreign_key(db_metadata):
     assert len(refresh_metadata(db_metadata).tables[test_table_name].foreign_keys) == 0
 
     # Test FK creation when a table name is passed in with a column string
-    create_foreign_key(test_table_name, "pk", f"{site_table.name}.pk")
+    schema.create_foreign_key(test_table_name, "pk", f"{site_table.name}.pk")
     test_table = refresh_metadata(db_metadata).tables[test_table_name]
     assert len(test_table.foreign_keys) == 1
     assert len(test_table.columns.pk.foreign_keys) == 1
 
     # Test FK creation when a table is passed in with a column object
-    create_foreign_key(test_table, "obj_order", site_table.columns.obj_order)
+    schema.create_foreign_key(test_table, "obj_order", site_table.columns.obj_order)
     test_table = refresh_metadata(db_metadata).tables[test_table_name]
     assert len(test_table.foreign_keys) == 2
     assert len(test_table.columns.obj_order.foreign_keys) == 1
@@ -1326,9 +1348,9 @@ def test_drop_foreign_key(db_metadata):
     # Test with invalid parameters
 
     with pytest.raises(ValueError, match="No table named"):
-        drop_foreign_key("nope", "pk")
+        schema.drop_foreign_key("nope", "pk")
     with pytest.raises(ValueError, match="No such foreign key in table"):
-        drop_foreign_key(site_table.name, "nope")
+        schema.drop_foreign_key(site_table.name, "nope")
 
     test_columns = ("pk", "obj_order", "obj_hash")
 
@@ -1368,7 +1390,7 @@ def test_drop_foreign_key(db_metadata):
     assert len(test_table.columns.obj_hash.foreign_keys) == 1
 
     # Test FK deletion when a table name is passed in with a mixed-case FK name
-    drop_foreign_key(test_table_name, "test_table_FIRST_fkey")
+    schema.drop_foreign_key(test_table_name, "test_table_FIRST_fkey")
     test_table = refresh_metadata(db_metadata).tables[test_table_name]
     assert len(test_table.foreign_keys) == 2
     assert len(test_table.columns.pk.foreign_keys) == 0
@@ -1376,7 +1398,7 @@ def test_drop_foreign_key(db_metadata):
     assert len(test_table.columns.obj_hash.foreign_keys) == 1
 
     # Test FK deletion when a table object is passed in with an FK constraint
-    drop_foreign_key(test_table, fk2)
+    schema.drop_foreign_key(test_table, fk2)
     test_table = refresh_metadata(db_metadata).tables[test_table_name]
     assert len(test_table.foreign_keys) == 1
     assert len(test_table.columns.pk.foreign_keys) == 0
@@ -1384,7 +1406,7 @@ def test_drop_foreign_key(db_metadata):
     assert len(test_table.columns.obj_hash.foreign_keys) == 1
 
     # Test FK deletion when a table object is passed in with an FK object
-    drop_foreign_key(test_table, fk3.elements[0])
+    schema.drop_foreign_key(test_table, fk3.elements[0])
     test_table = refresh_metadata(db_metadata).tables[test_table_name]
     assert len(test_table.foreign_keys) == 0
     assert len(test_table.columns.pk.foreign_keys) == 0
@@ -1399,13 +1421,13 @@ def test_alter_column_type(db_metadata):
 
     # Test SQL injection code
     with pytest.raises(ValueError, match="Invalid table name"):
-        alter_column_type(inject_sql, "test_bool", "int")
+        schema.alter_column_type(inject_sql, "test_bool", "int")
     with pytest.raises(ValueError, match="Invalid column name"):
-        alter_column_type(table_name, inject_sql, "int")
+        schema.alter_column_type(table_name, inject_sql, "int")
     with pytest.raises(ValueError, match="Invalid column type"):
-        alter_column_type(table_name, "test_bool", inject_sql)
+        schema.alter_column_type(table_name, "test_bool", inject_sql)
     with pytest.raises(ValueError, match="Invalid column conversion"):
-        alter_column_type(table_name, "test_bool", "int", inject_sql)
+        schema.alter_column_type(table_name, "test_bool", "int", inject_sql)
 
     # PK column tests
 
@@ -1414,12 +1436,12 @@ def test_alter_column_type(db_metadata):
     assert str(original.type).lower() == "integer"
 
     # Test change from INTEGER to VARCHAR
-    alter_column_type(table_name, "pk", "varchar")
+    schema.alter_column_type(table_name, "pk", "varchar")
     altered = refresh_metadata(db_metadata).tables.get(table_name).columns.pk
     assert str(altered.type).lower() == "varchar"
 
     # Test change from VARCHAR back to INTEGER
-    alter_column_type(table_name, "pk", "int")
+    schema.alter_column_type(table_name, "pk", "int")
     altered = refresh_metadata(db_metadata).tables.get(table_name).columns.pk
     assert str(altered.type).lower() == "integer"
 
@@ -1430,12 +1452,12 @@ def test_alter_column_type(db_metadata):
     assert str(original.type).lower() == "boolean"
 
     # Test change from BOOLEAN to INTEGER
-    alter_column_type(db_metadata.tables[table_name], "test_bool", "int")
+    schema.alter_column_type(db_metadata.tables[table_name], "test_bool", "int")
     altered = refresh_metadata(db_metadata).tables.get(table_name).columns.test_bool
     assert str(altered.type).lower() == "integer"
 
     # Test change from INTEGER back to BOOLEAN
-    alter_column_type(db_metadata.tables[table_name], "test_bool", "bool")
+    schema.alter_column_type(db_metadata.tables[table_name], "test_bool", "bool")
     altered = refresh_metadata(db_metadata).tables.get(table_name).columns.test_bool
     assert str(altered.type).lower() == "boolean"
 
@@ -1446,37 +1468,39 @@ def test_alter_column_type(db_metadata):
     assert str(original.type).lower().startswith("geometry")
 
     # Test change from GEOMETRY to BYTEA
-    alter_column_type(db_metadata.tables[table_name], "test_geom", "bytea")
+    schema.alter_column_type(db_metadata.tables[table_name], "test_geom", "bytea")
     altered = refresh_metadata(db_metadata).tables.get(table_name).columns.test_geom
     assert str(altered.type).lower() == "bytea"
 
     # Test change from BYTEA to generic GEOMETRY (without "using")
-    alter_column_type(db_metadata.tables[table_name], "test_geom", "geometry")
+    schema.alter_column_type(db_metadata.tables[table_name], "test_geom", "geometry")
     altered = refresh_metadata(db_metadata).tables.get(table_name).columns.test_geom
     assert str(altered.type).lower().startswith("geometry")
 
     # Test change from GEOMETRY to TEXT
-    alter_column_type(db_metadata.tables[table_name], "test_geom", "text")
+    schema.alter_column_type(db_metadata.tables[table_name], "test_geom", "text")
     altered = refresh_metadata(db_metadata).tables.get(table_name).columns.test_geom
     assert str(altered.type).lower() == "text"
 
     # Test change from TEXT to POINT
-    alter_column_type(db_metadata.tables[table_name], "test_geom", "geometry", using="geometry(POINT,4326)")
+    schema.alter_column_type(db_metadata.tables[table_name], "test_geom", "geometry", using="geometry(POINT,4326)")
     altered = refresh_metadata(db_metadata).tables.get(table_name).columns.test_geom
     assert str(altered.type).lower().startswith("geometry")
 
     # Test change from POINT to LINE
-    alter_column_type(db_metadata.tables[table_name], "test_geom", "geometry", using="geometry(LINESTRING,4326)")
+    schema.alter_column_type(
+        db_metadata.tables[table_name], "test_geom", "geometry", using="geometry(LINESTRING,4326)"
+    )
     altered = refresh_metadata(db_metadata).tables.get(table_name).columns.test_geom
     assert str(altered.type).lower().startswith("geometry")
 
     # Test change from LINE to POLYGON
-    alter_column_type(db_metadata.tables[table_name], "test_geom", "geometry", using="geometry(POLYGON,4326)")
+    schema.alter_column_type(db_metadata.tables[table_name], "test_geom", "geometry", using="geometry(POLYGON,4326)")
     altered = refresh_metadata(db_metadata).tables.get(table_name).columns.test_geom
     assert str(altered.type).lower().startswith("geometry")
 
     # Test change from POLYGON back to BYTEA
-    alter_column_type(db_metadata.tables[table_name], "test_geom", "bytea")
+    schema.alter_column_type(db_metadata.tables[table_name], "test_geom", "bytea")
     altered = refresh_metadata(db_metadata).tables.get(table_name).columns.test_geom
     assert str(altered.type).lower() == "bytea"
 
@@ -1488,62 +1512,62 @@ def test_create_column(db_metadata):
 
     # Test SQL injection code
     with pytest.raises(ValueError, match="Invalid table name"):
-        create_column(inject_sql, "test_json", "jsonb", default="")
+        schema.create_column(inject_sql, "test_json", "jsonb", default="")
     with pytest.raises(ValueError, match="Invalid column name"):
-        create_column(site_table.name, inject_sql, "jsonb", default="")
+        schema.create_column(site_table.name, inject_sql, "jsonb", default="")
     with pytest.raises(ValueError, match="Invalid column type"):
-        create_column(site_table, "test_json", inject_sql, default="")
+        schema.create_column(site_table, "test_json", inject_sql, default="")
     with pytest.raises(ValueError, match="Invalid default value"):
-        create_column(site_table.name, "test_json", "jsonb", default=inject_sql)
+        schema.create_column(site_table.name, "test_json", "jsonb", default=inject_sql)
 
     # Test when column already exists
 
     column = "test_bool"
     assert column in site_table.columns
 
-    create_column(site_table.name, "test_bool", "bool", default=False, checkfirst=True)
+    schema.create_column(site_table.name, "test_bool", "bool", default=False, checkfirst=True)
     with pytest.raises(Exception):
-        create_column(site_table.name, "test_bool", "bool", default=False, checkfirst=False)
+        schema.create_column(site_table.name, "test_bool", "bool", default=False, checkfirst=False)
 
     # Test column creation
 
     column = "test_text"
-    create_column(site_table.name, column, "varchar", default="nothing")
+    schema.create_column(site_table.name, column, "varchar", default="nothing")
     newcol = refresh_metadata(db_metadata).tables[site_table.name].columns.get(column)
     assert column == newcol.name
     assert str(newcol.type).lower().startswith("varchar")
     assert not newcol.nullable
 
     column = "test_true"
-    create_column(site_table.name, column, "bool", default=True)
+    schema.create_column(site_table.name, column, "bool", default=True)
     newcol = refresh_metadata(db_metadata).tables[site_table.name].columns.get(column)
     assert column == newcol.name
     assert str(newcol.type).lower().startswith("bool")
     assert not newcol.nullable
 
     column = "test_int"
-    create_column(site_table.name, column, "integer", default=50)
+    schema.create_column(site_table.name, column, "integer", default=50)
     newcol = refresh_metadata(db_metadata).tables[site_table.name].columns.get(column)
     assert column == newcol.name
     assert str(newcol.type).lower().startswith("integer")
     assert not newcol.nullable
 
     column = "test_num"
-    create_column(site_table.name, column, "decimal", default=3.14159)
+    schema.create_column(site_table.name, column, "decimal", default=3.14159)
     newcol = refresh_metadata(db_metadata).tables[site_table.name].columns.get(column)
     assert column == newcol.name
     assert str(newcol.type).lower().startswith("numeric")
     assert not newcol.nullable
 
     column = "test_jsonb"
-    create_column(site_table.name, column, "jsonb", nullable=True)
+    schema.create_column(site_table.name, column, "jsonb", nullable=True)
     newcol = refresh_metadata(db_metadata).tables[site_table.name].columns.get(column)
     assert column == newcol.name
     assert str(newcol.type).lower().startswith("json")
     assert newcol.nullable
 
     column = "test_point"
-    create_column(site_table.name, column, "geometry(POINT,4326)", nullable=True)
+    schema.create_column(site_table.name, column, "geometry(POINT,4326)", nullable=True)
     newcol = refresh_metadata(db_metadata).tables[site_table.name].columns.get(column)
     assert column == newcol.name
     assert str(newcol.type).lower().startswith("geometry")
@@ -1557,29 +1581,29 @@ def test_drop_column(db_metadata):
 
     # Test SQL injection code
     with pytest.raises(ValueError, match="Invalid table name"):
-        drop_column(inject_sql, "test_bool")
+        schema.drop_column(inject_sql, "test_bool")
     with pytest.raises(ValueError, match="Invalid column name"):
-        drop_column(site_table.name, inject_sql)
+        schema.drop_column(site_table.name, inject_sql)
 
     # Test when the column doesn't exist
 
     column = "nope"
     assert column not in site_table.columns
-    drop_column(site_table.name, column, checkfirst=True)
+    schema.drop_column(site_table.name, column, checkfirst=True)
     assert column not in refresh_metadata(db_metadata).tables[site_table.name].columns
 
     # Test for the presence and removal of a simple column
 
     column = "test_bool"
     assert column in site_table.columns
-    drop_column(site_table.name, column)
+    schema.drop_column(site_table.name, column)
     assert column not in refresh_metadata(db_metadata).tables[site_table.name].columns
 
     # Test for the presence and removal of an indexed column
 
     column = "obj_order"
     assert column in site_table.columns
-    drop_column(site_table, column)
+    schema.drop_column(site_table, column)
     assert column not in refresh_metadata(db_metadata).tables[site_table.name].columns
 
 
@@ -1591,22 +1615,22 @@ def test_create_tsvector_column(db_metadata):
 
     # At least test SQL injection code
     with pytest.raises(ValueError, match="Invalid table name"):
-        create_tsvector_column(inject_sql, "searchable", ["obj_hash"])
+        schema.create_tsvector_column(inject_sql, "searchable", ["obj_hash"])
     with pytest.raises(ValueError, match="Invalid column name"):
-        create_tsvector_column(site_table, inject_sql, ["obj_hash"], "tsvector_index")
+        schema.create_tsvector_column(site_table, inject_sql, ["obj_hash"], "tsvector_index")
     with pytest.raises(ValueError, match="Invalid column names"):
-        create_tsvector_column(site_table.name, "searchable", ["obj_hash", inject_sql], "tsvector_index")
+        schema.create_tsvector_column(site_table.name, "searchable", ["obj_hash", inject_sql], "tsvector_index")
 
     # Test when column already exists
 
     with pytest.raises(Exception):
-        create_tsvector_column(site_table.name, "site_addr", SEARCHABLE_COLS)
+        schema.create_tsvector_column(site_table.name, "site_addr", SEARCHABLE_COLS)
 
     # Test column creation (unable tests remotely: requires PostgreSQL 12)
 
     # col_name = "generated_search_col"
     # idx_name = "generated_tsvector_index"
-    # create_tsvector_column(site_table.name, col_name, SEARCHABLE_COLS, index_name=idx_name)
+    # schema.create_tsvector_column(site_table.name, col_name, SEARCHABLE_COLS, index_name=idx_name)
     #
     # newcol = refresh_metadata(db_metadata).tables[site_table.name].columns.get(col_name)
     # assert col_name == newcol.name
@@ -1623,41 +1647,41 @@ def test_query_json_keys(db_metadata):
     # Test with invalid parameters
 
     with pytest.raises(ValueError, match="No table named"):
-        query_json_keys("nope", "site_addr", {"state": "NY"})
+        sql.query_json_keys("nope", "site_addr", {"state": "NY"})
     with pytest.raises(ValueError, match="Invalid column name"):
-        query_json_keys(SITE_TABLE_NAME, "nope", {"state": "NY"})
+        sql.query_json_keys(SITE_TABLE_NAME, "nope", {"state": "NY"})
 
     # Test a query that will return all columns for all records
     limit = len(SITE_TEST_DATA)
-    search_results = query_json_keys(site_table, "site_json", {"city": "ALBANY", "state": "NY"})
+    search_results = sql.query_json_keys(site_table, "site_json", {"city": "ALBANY", "state": "NY"})
     assert limit == len({result["pk"] for result in search_results})
     assert all(len(result) == len(SITE_TABLE_COLS) for result in search_results)
 
     # Test limiting a query that will return all columns for all records
     limit = round(len(SITE_TEST_DATA) / 2)
-    search_results = query_json_keys(site_table, "site_json", {"city": "ALBANY", "state": "NY"}, limit=limit)
+    search_results = sql.query_json_keys(site_table, "site_json", {"city": "ALBANY", "state": "NY"}, limit=limit)
     assert limit == len({result["pk"] for result in search_results})
     assert all(len(result) == len(SITE_TABLE_COLS) for result in search_results)
 
     # Test an excessive limit on a query that will return all columns for all records
     limit = len(SITE_TEST_DATA)
-    search_results = query_json_keys(site_table, "site_json", {"city": "ALBANY", "state": "NY"}, limit=(limit * 2))
+    search_results = sql.query_json_keys(site_table, "site_json", {"city": "ALBANY", "state": "NY"}, limit=(limit * 2))
     assert limit == len({result["pk"] for result in search_results})
     assert all(len(result) == len(SITE_TABLE_COLS) for result in search_results)
 
     # Test a single matching address as string
     query, matches = json.dumps({"number": "7550", "street": "STATE ST STE CML5"}), 1
-    search_results = query_json_keys(site_table.name, "site_json", query)
+    search_results = sql.query_json_keys(site_table.name, "site_json", query)
     assert matches == len({result["pk"] for result in search_results})
 
     # Test an invalid address
     query, matches = {"street": "nope"}, 0
-    search_results = query_json_keys(site_table.name, "site_json", query)
+    search_results = sql.query_json_keys(site_table.name, "site_json", query)
     assert matches == len({result["pk"] for result in search_results})
 
     # Test an empty address
     query, matches = '""', 0
-    search_results = query_json_keys(site_table.name, "site_json", query)
+    search_results = sql.query_json_keys(site_table.name, "site_json", query)
     assert matches == len({result["pk"] for result in search_results})
 
 
@@ -1668,65 +1692,65 @@ def test_query_tsvector_columns(db_metadata):
     # Test with invalid parameters
 
     with pytest.raises(ValueError, match="No table named"):
-        query_tsvector_columns("nope", "site_addr", "NY")
+        sql.query_tsvector_columns("nope", "site_addr", "NY")
     with pytest.raises(ValueError, match="Invalid column names"):
-        query_tsvector_columns(site_table, "nope", "NY")
+        sql.query_tsvector_columns(site_table, "nope", "NY")
 
     # Test queries that match all records
     limit = len(SITE_TEST_DATA)
     for query in ("ALBANY", "NY", "STATE", "12224"):
-        assert limit == len(query_tsvector_columns(SITE_TABLE_NAME, SEARCHABLE_COLS, query))
+        assert limit == len(sql.query_tsvector_columns(SITE_TABLE_NAME, SEARCHABLE_COLS, query))
 
     # Test that limit applies to queries matching all records
     for limit, query in enumerate(("ALBANY", "NY", "STATE", "12224")):
-        search_results = query_tsvector_columns(site_table, SEARCHABLE_COLS, query, limit=limit)
+        search_results = sql.query_tsvector_columns(site_table, SEARCHABLE_COLS, query, limit=limit)
         assert limit == len({result["pk"] for result in search_results})
 
     # Test an excessive limit on a query that matches all records
     query, matches = "NY", len(SITE_TEST_DATA)
-    search_results = query_tsvector_columns(site_table.name, SEARCHABLE_COLS, query, limit=(matches * 2))
+    search_results = sql.query_tsvector_columns(site_table.name, SEARCHABLE_COLS, query, limit=(matches * 2))
     assert matches == len({result["pk"] for result in search_results})
     assert all(len(result) == len(SITE_TABLE_COLS) for result in search_results)
 
     # Test queries that match a single record
 
     query, matches = "0-0-7350-12224", 1
-    search_results = query_tsvector_columns(site_table.name, SEARCHABLE_COLS, query)
+    search_results = sql.query_tsvector_columns(site_table.name, SEARCHABLE_COLS, query)
     assert matches == len({result["pk"] for result in search_results})
     assert all(len(result) == len(SITE_TABLE_COLS) for result in search_results)
 
     query, matches = "7550 STATE ST STE CML5", 1
-    search_results = query_tsvector_columns(site_table.name, SEARCHABLE_COLS, query)
+    search_results = sql.query_tsvector_columns(site_table.name, SEARCHABLE_COLS, query)
     assert matches == len({result["pk"] for result in search_results})
     assert all(len(result) == len(SITE_TABLE_COLS) for result in search_results)
 
     terms = "7550 STATE ST STE CML5".split()[::-1]
     query, matches = " ".join(terms), 1
-    search_results = query_tsvector_columns(site_table.name, SEARCHABLE_COLS, query)
+    search_results = sql.query_tsvector_columns(site_table.name, SEARCHABLE_COLS, query)
     assert matches == len({result["pk"] for result in search_results})
     assert all(len(result) == len(SITE_TABLE_COLS) for result in search_results)
 
     query, matches = "8-4-7550-12224 7550 STATE ST STE CML5 ALBANY NY 12224", 1
-    search_results = query_tsvector_columns(site_table.name, SEARCHABLE_COLS, query)
+    search_results = sql.query_tsvector_columns(site_table.name, SEARCHABLE_COLS, query)
     assert matches == len({result["pk"] for result in search_results})
     assert all(len(result) == len(SITE_TABLE_COLS) for result in search_results)
 
     terms = "8-4-7550-12224 7550 STATE ST STE CML5 ALBANY NY 12224".split()[::-1]
     query, matches = " ".join(terms), 1
-    search_results = query_tsvector_columns(site_table.name, SEARCHABLE_COLS, query)
+    search_results = sql.query_tsvector_columns(site_table.name, SEARCHABLE_COLS, query)
     assert matches == len({result["pk"] for result in search_results})
     assert all(len(result) == len(SITE_TABLE_COLS) for result in search_results)
 
     # Test queries that don't match any records
 
     query, matches = "nope", 0
-    search_results = query_tsvector_columns(site_table.name, SEARCHABLE_COLS, query)
+    search_results = sql.query_tsvector_columns(site_table.name, SEARCHABLE_COLS, query)
     assert matches == len({result["pk"] for result in search_results})
 
     query, matches = "STATE ST", 0
-    search_results = query_tsvector_columns(site_table.name, "obj_hash", query)
+    search_results = sql.query_tsvector_columns(site_table.name, "obj_hash", query)
     assert matches == len({result["pk"] for result in search_results})
 
     query, matches = "0-0-7350-12224", 0
-    search_results = query_tsvector_columns(site_table.name, "site_addr", query)
+    search_results = sql.query_tsvector_columns(site_table.name, "site_addr", query)
     assert matches == len({result["pk"] for result in search_results})
