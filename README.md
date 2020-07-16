@@ -1,6 +1,6 @@
 # pg-database-utils
 
-[![Build Status](https://travis-ci.org/consbio/pg-database-utils.png?branch=master)](https://travis-ci.org/consbio/pg-database-utils)[![Coverage Status](https://coveralls.io/repos/github/consbio/pg-database-utils/badge.svg?branch=master)](https://coveralls.io/github/consbio/pg-database-utils?branch=master)
+[![Build Status](https://travis-ci.org/consbio/pg-database-utils.png?branch=main)](https://travis-ci.org/consbio/pg-database-utils)[![Coverage Status](https://coveralls.io/repos/github/consbio/pg-database-utils/badge.svg?branch=main)](https://coveralls.io/github/consbio/pg-database-utils?branch=main)
 
 A suite of utilities for PostgreSQL database queries and operations built on sqlalchemy.
 
@@ -30,11 +30,13 @@ otherwise, you can configure your own without having Django as a dependency.
 
 ### To configure with Django
 
-If you want to use the default database, there is nothing to do; otherwise:
-1. Create a JSON configuration file:
+If you want to use the "default" database, **no configuration is required**.
+
+If you want to specify a particular Django database to read settings from:
+1. Create a JSON configuration file with the database name:
 ```python
 {
-    "django-db-key": "not_default"
+    "django-db-key": "override_default"
 }
 ```
 2. Set the `DATABASE_CONFIG_JSON` environment variable to point to the location of the file
@@ -62,8 +64,9 @@ If you specify a Django database, those database connection settings will be use
 Additional configuration options include:
 ```python
 {
-    "date-format": "optional",      # Defaults to "%Y-%m-%d"
-    "timestamp-format": "optional"  # Defaults to "%Y-%m-%d %H:%M:%S"
+    "connect-args": {"sslmode": "require"},  # Defaults to postgres settings, "prefer" by default
+    "date-format": "optional",               # Defaults to "%Y-%m-%d"
+    "timestamp-format": "optional"           # Defaults to "%Y-%m-%d %H:%M:%S"
 }
 ```
 
