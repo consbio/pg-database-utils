@@ -6,28 +6,21 @@ python:
   - "3.8"
   - "3.7"
   - "3.6"
-
-addons:
-    postgresql: '12'
-    apt:
-      packages:
-        - postgresql-12
-        - postgresql-client-12
 env:
   - TOXENV=django
   - TOXENV=nodjango
   - TOXENV=coverage
-  global:
-    - PGVER=12
-    - PGPORT=5433
 
 sudo: true  # Allow the sudo command
 
 before_install:
   - sudo apt-get update
+  - sudo apt-get --yes remove postgresql\*
+  - sudo apt-get install -y postgresql-12 postgresql-client-12 postgresql-12-postgis-2.5 postgresql-12-postgis-2.5-scripts
   - sudo sed -i 's/port = 5433/port = 5432/' /etc/postgresql/12/main/postgresql.conf
-  - sudo cp /etc/postgresql/{9.3,12}/main/pg_hba.conf
-  - sudo pg_ctlcluster 12 main restart
+  - sudo cp /etc/postgresql/{9.6,12}/main/pg_hba.conf
+  - sudo cp /etc/postgresql/{10,12}/main/pg_hba.conf
+  - sudo service postgresql restart 12
 install:
   - pip install frozendict
   - pip install sqlalchemy
