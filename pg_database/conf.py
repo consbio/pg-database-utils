@@ -207,7 +207,7 @@ class PgDatabaseSettings(object):
                 "database-name": django_database.get("NAME"),
                 "database-user": django_database.get("USER"),
                 "database-password": django_database.get("PASSWORD"),
-                "connect-args": django_database.get("OPTIONS")
+                "connect-args": django_database.get("OPTIONS", database_config.get("connect-args"))
             })
 
             self._database_config = frozendict(database_config)
