@@ -9,7 +9,7 @@ import warnings
 from sqlalchemy import create_engine, Column, Index, Table, select
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine.url import URL
-from sqlalchemy.exc import SAWarning
+from sqlalchemy.exc import ArgumentError, SAWarning
 from sqlalchemy.sql import func, text, sqltypes
 from sqlalchemy.schema import AddConstraint, DropConstraint, ForeignKeyConstraint, MetaData
 
@@ -287,6 +287,10 @@ def assert_records(meta, table_name, target_data, target_columns=None, target_co
             elif isinstance(record_val, (dict, list, set, tuple)):
                 assert record_val == target_val
             else:
+                if isinstance(record_val, bytes):
+                    record_val = record_val.decode()
+                if isinstance(target_val, bytes):
+                    target_val = target_val.decode()
                 assert str(record_val) == str(target_val)
 
 
@@ -335,6 +339,7 @@ def refresh_metadata(meta):
 
 @pytest.fixture()
 def db_settings():
+    """ Remove/restore environment variables before/after implementing tests """
 
     db_env = os.environ.pop(ENVIRONMENT_VARIABLE, "")
     dj_env = os.environ.pop(DJANGO_SETTINGS_VAR, "")
@@ -344,7 +349,6 @@ def db_settings():
     yield {
         ENVIRONMENT_VARIABLE: db_env,
         DJANGO_SETTINGS_VAR: dj_env,
-        "DJANGO_CONFIGURED": settings._django_settings is not settings.empty
     }
 
     if db_env:
@@ -364,6 +368,7 @@ def reload_django_settings(db_settings):
 def test_conf_settings_init(db_settings):
 
     db_env = db_settings[ENVIRONMENT_VARIABLE]
+    dj_env = db_settings[DJANGO_SETTINGS_VAR]
 
     # Should not raise errors
 
@@ -385,16 +390,24 @@ def test_conf_settings_init(db_settings):
     with pytest.raises(EnvironmentError, match="Database configuration file does not contain JSON"):
         conf.PgDatabaseSettings()
 
+    os.environ[DJANGO_SETTINGS_VAR] = dj_env
+    os.environ[ENVIRONMENT_VARIABLE] = db_env
+    new_settings = conf.PgDatabaseSettings()
+
+    if conf.DJANGO_INSTALLED:
+        assert hasattr(new_settings._django_settings, "DATABASES")
+    else:
+        assert new_settings._django_settings == conf.EMPTY
+
 
 def test_conf_settings_dbinfo(db_settings):
 
     db_env = db_settings[ENVIRONMENT_VARIABLE]
     dj_env = db_settings[DJANGO_SETTINGS_VAR]
 
-    django_configured = db_settings["DJANGO_CONFIGURED"]
     no_config_message = "No database configuration available"
     config_key_message = "Database configuration missing required key"
-    invalid_dj_message = config_key_message if django_configured else no_config_message
+    invalid_dj_message = config_key_message if conf.DJANGO_INSTALLED else no_config_message
 
     # Test with no settings configured
     with pytest.raises(EnvironmentError, match=no_config_message):
@@ -420,7 +433,7 @@ def test_conf_settings_dbinfo(db_settings):
         reload_django_settings(conf.settings)
         conf.PgDatabaseSettings().database_info
 
-    if django_configured:
+    if conf.DJANGO_INSTALLED:
         no_django_db_message = "No Django database configured for"
 
         # Test with invalid Django database in config and valid Django settings
@@ -452,15 +465,15 @@ def test_conf_settings_dbinfo(db_settings):
 
 
 def test_conf_settings_props():
+    """ No need for db_settings fixture: environment variables need to be intact """
 
-    settings = conf.settings
-    django_configured = settings._django_settings is not settings.empty
+    django_installed = conf.DJANGO_INSTALLED
 
     # Test non-database properties
 
     test_settings = conf.PgDatabaseSettings()
 
-    assert test_settings.connect_args == {"sslmode": "allow" if django_configured else "prefer"}
+    assert test_settings.connect_args == {"sslmode": "allow" if django_installed else "prefer"}
     assert test_settings.django_db_key == "other"
     assert test_settings.date_format == DEFAULT_DATE_FORMAT
     assert test_settings.timestamp_format == DEFAULT_TIMESTAMP_FORMAT
@@ -473,7 +486,7 @@ def test_conf_settings_props():
     conf_name = "pg_database"
     conf_port = DEFAULT_PORT
     conf_host = None
-    conf_user = "django" if django_configured else DEFAULT_USER
+    conf_user = "django" if django_installed else DEFAULT_USER
     conf_pass = None
 
     assert test_settings.database_info["drivername"] == conf_engine
@@ -513,15 +526,15 @@ def test_conf_settings_props():
 
     test_settings = conf.PgDatabaseSettings()
 
-    django_engine = "django.contrib.gis.db.backends.postgis" if django_configured else None
-    django_name = conf_name if django_configured else None
+    django_engine = "django.contrib.gis.db.backends.postgis" if django_installed else None
+    django_name = conf_name if django_installed else None
     django_port = None
     django_host = None
-    django_user = "django" if django_configured else None
+    django_user = "django" if django_installed else None
     django_pass = None
-    django_options = {"sslmode": "allow"} if django_configured else None
+    django_options = {"sslmode": "allow"} if django_installed else None
 
-    if not django_configured:
+    if not django_installed:
         assert test_settings.django_database == {}
     else:
         assert test_settings.django_database["django_engine"] == django_engine
@@ -585,6 +598,7 @@ def db_drop(postgres_engine):
 
 @pytest.fixture(scope='session')
 def db_engine():
+    """ Create a database engine for use in implementing tests """
 
     postgres_engine = create_engine("postgresql:///postgres", isolation_level="AUTOCOMMIT")
 
@@ -601,7 +615,7 @@ def db_engine():
 
 @pytest.fixture
 def db_metadata(db_engine):
-    """ Provides setup and teardown functionality for database tests """
+    """ Provides setup and teardown functionality for all database tests """
 
     with warnings.catch_warnings():
         warnings.filterwarnings('ignore', message="Skipped unsupported reflection", category=SAWarning)
@@ -819,14 +833,17 @@ def test_create_table(db_metadata):
             tmp_table_name, index_cols={"col": "unique", "nope": "unique"}, col="string", dropfirst=True
         )
 
+    # Test with no indexes
+
+    schema.create_table(table_name, dropfirst=True, **SITE_COL_TYPES)
+    assert_table(db_metadata, table_name, SITE_COL_TYPES)
+    assert not refresh_metadata(db_metadata).tables[table_name].indexes
+
     # Test with string of index columns
 
-    schema.create_table(
-        table_name,
-        index_cols="pk,obj_order",
-        dropfirst=True,
-        **SITE_COL_TYPES
-    )
+    refresh_metadata(db_metadata).tables[table_name].drop()
+
+    schema.create_table(table_name, index_cols="pk,obj_order", **SITE_COL_TYPES)
     assert_table(db_metadata, table_name, SITE_COL_TYPES)
     assert_index(db_metadata, table_name, index_name=f"{table_name}_pk_obj_order_idx")
 
@@ -1025,11 +1042,8 @@ def test_insert_into(db_metadata):
     ]
     target_data = {p["pk"]: p for p in target_vals}
 
-    insert_vals = [
-        # Ensure the order of values matches the target columns
-        [p[c] for c in target_cols]
-        for p in target_vals
-    ]
+    # Ensure the order of values matches the target columns
+    insert_vals = [[p[c] for c in target_cols] for p in target_vals]
 
     # Test insert with new table and no types specified
 
@@ -1118,15 +1132,12 @@ def test_select_into(db_metadata):
         }
         for p in SITE_TEST_DATA
     }
-    insert_vals = [
-        # Ensure the order of values matches the target columns
-        [p[c] for c in target_cols]
-        for p in target_data.values()
-    ]
+
+    # Ensure the order of values matches the target columns
+    insert_vals = [[p[c] for c in target_cols] for p in target_data.values()]
     insert_types = [
         # Use existing type dict to derive type names for each column
-        SITE_COL_TYPES.get(col, sqltypes.Text).__visit_name__
-        for col in target_cols
+        SITE_COL_TYPES.get(col, sqltypes.Text).__visit_name__ for col in target_cols
     ]
 
     # Test insert with no types specified (
@@ -1226,10 +1237,10 @@ def test_update_rows(db_metadata):
         """
         row = list(row)
 
-        if row[3]["number"] != "7350":
+        if row[-1]["number"] != "7350":
             row = None
         else:
-            row[3]["changed"] = True
+            row[-1]["changed"] = True
         return row
 
     def update_none(row):
@@ -1292,9 +1303,9 @@ def test_update_rows(db_metadata):
     assert target_data != test_data
     assert f"tmp_{test_table_name}" not in refresh_metadata(db_metadata).tables
 
-    # Test updating some the rows depending on address
+    # Test updating some the rows depending on address, joining on more than one column
 
-    sql.update_rows(test_table_name, "pk", target_cols, update_some, batch_size=3)
+    sql.update_rows(test_table_name, "pk,obj_order", target_cols, update_some, batch_size=3)
 
     test_data = target_data
     target_data = {}
@@ -1314,6 +1325,62 @@ def test_update_rows(db_metadata):
 
     assert_records(db_metadata, test_table_name, target_data, target_cols)
     assert f"tmp_{test_table_name}" not in refresh_metadata(db_metadata).tables
+
+
+def test_values_clause(db_metadata):
+
+    into_table_name = ALL_TEST_TABLES[1]
+
+    # Define VALUES clause columns, types and values
+
+    target_cols = ["pk", "hash", "int", "str", "bool", "float"]
+    target_types = ["text", "binary", "integer", "unicode", "boolean", "float"]
+    target_values = [
+        ("128_2761_66", b"0065455eeaf0bd713f26dfb95f5dd9bf", 535, "STATE ST", 1, 42.5),
+        ("128_2761_67", b"786334b2a927a8e3c6eee727849ab316", 536, "STATE ST", 0, "86.7"),
+        ("128_2761_68", b"c47fa34a1d7a1f8bd686e98c201d12bd", "537", "STATE ST", True, -4),
+    ]
+    target_data = {p["pk"]: p for p in [dict(zip(target_cols, row)) for row in target_values]}
+
+    # Test invalid types in VALUES clause
+
+    with pytest.raises(ArgumentError, match="Types do not correspond to columns"):
+        sql.Values(target_cols, target_types[:-1], *target_values)
+
+    # Test SELECT INTO with VALUES clause
+
+    select_from = sql.Values(",".join(target_cols), ",".join(target_types), *target_values)
+    select_into = sql.SelectInto([sql.column(c) for c in target_cols], into_table_name).select_from(select_from)
+    with db_metadata.bind.connect() as conn:
+        conn.execute(select_into.execution_options(autocommit=True))
+
+    assert_table(db_metadata, into_table_name, target_cols)
+    assert_records(db_metadata, into_table_name, target_data, target_cols)
+
+    into_table = refresh_metadata(db_metadata).tables[into_table_name]
+
+    for idx, col in enumerate(target_cols):
+        column_type = str(into_table.columns[col].type).lower()
+        target_type = target_types[idx].lower()
+
+        if target_type in ("binary", "text", "unicode"):
+            assert column_type == "text"
+        elif target_type in ("float",):
+            assert column_type == "numeric"
+        else:
+            assert column_type == target_type
+
+    # Test INSERT INTO with VALUES clause
+
+    insert_from = sql.Values(",".join(target_cols), ",".join(target_types), *target_values)
+    insert_vals = sql.Select([sql.column(c) for c in target_cols]).select_from(insert_from)
+    insert_into = sql.Insert(into_table).from_select(names=target_cols, select=insert_vals)
+    with schema.get_engine().connect() as conn:
+        conn.execute(insert_into.execution_options(autocommit=True))
+
+    target_count = len(target_values) * 2
+    assert_table(db_metadata, into_table_name, target_cols)
+    assert_records(db_metadata, into_table_name, target_data, target_cols, target_count)
 
 
 def test_table_exists(db_metadata):
@@ -1651,18 +1718,32 @@ def test_create_tsvector_column(db_metadata):
     with pytest.raises(Exception):
         schema.create_tsvector_column(site_table.name, "site_addr", SEARCHABLE_COLS)
 
-    # Test column creation (unable tests remotely: requires PostgreSQL 12)
+    # Test column creation on all searchable columns
 
-    # col_name = "generated_search_col"
-    # idx_name = "generated_tsvector_index"
-    # schema.create_tsvector_column(site_table.name, col_name, SEARCHABLE_COLS, index_name=idx_name)
-    #
-    # newcol = refresh_metadata(db_metadata).tables[site_table.name].columns.get(col_name)
-    # assert col_name == newcol.name
-    # assert str(newcol.type).lower().startswith("tsvector")
-    #
-    # # TSVECTOR indexes are not loaded from database via table reflection
-    # assert_index(db_metadata, site_table.name, index_name=idx_name)
+    col_name = "generated_search_col"
+    idx_name = "generated_tsvector_index"
+    schema.create_tsvector_column(site_table.name, col_name, SEARCHABLE_COLS, index_name=idx_name)
+
+    newcol = refresh_metadata(db_metadata).tables[site_table.name].columns.get(col_name)
+    assert col_name == newcol.name
+    assert str(newcol.type).lower().startswith("tsvector")
+
+    # TSVECTOR indexes are not loaded from database via table reflection
+    assert_index(db_metadata, site_table.name, index_name=idx_name)
+
+    # Test column creation on a subset of searchable columns
+
+    col_name = "generated_site_col"
+    idx_name = "generated_site_index"
+    site_cols = ",".join(col for col in SEARCHABLE_COLS if col.startswith("site_"))
+    schema.create_tsvector_column(site_table.name, col_name, site_cols, index_name=idx_name)
+
+    newcol = refresh_metadata(db_metadata).tables[site_table.name].columns.get(col_name)
+    assert col_name == newcol.name
+    assert str(newcol.type).lower().startswith("tsvector")
+
+    # TSVECTOR indexes are not loaded from database via table reflection
+    assert_index(db_metadata, site_table.name, index_name=idx_name)
 
 
 def test_query_json_keys(db_metadata):

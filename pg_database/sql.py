@@ -524,18 +524,22 @@ class Values(FromClause):
     """
 
     def __init__(self, cols, types=None, *args):
-        self.cols = cols
-        self.vals = args
 
-        if isinstance(self.cols, str):
-            self.cols = [c.strip().join('""') for c in self.cols.split(",")]
+        if isinstance(cols, str):
+            cols = [c.strip().join('""') for c in cols.split(",")]
+        if isinstance(types, str):
+            types = [c.strip() for c in types.split(",")]
 
         if not types:
-            self.types = [sqltypes.UnicodeText for _ in range(len(self.cols))]
+            types = [sqltypes.UnicodeText for _ in range(len(cols))]
         elif len(cols) == len(types):
-            self.types = [column_type_for(t) for t in types]
+            types = [column_type_for(t) for t in types]
         else:
-            raise exc.ArgumentError("Types do not correspond to columns")
+            raise exc.ArgumentError(f"Types do not correspond to columns:\n\ttypes: {types}\n\tcols:{cols}")
+
+        self.cols = cols
+        self.vals = args
+        self.types = types
 
 
 @compiles(Values)

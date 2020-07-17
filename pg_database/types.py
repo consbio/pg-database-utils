@@ -25,7 +25,9 @@ COLUMN_TYPE_MAP = frozendict({
     "number": sqltypes.Numeric,
     "json": postgresql.json.JSON,
     "jsonb": postgresql.json.JSONB,
+    "text": sqltypes.UnicodeText,
     "unicode": sqltypes.UnicodeText,
+    "varchar": sqltypes.UnicodeText,
 })
 
 DATE_FORMAT = settings.date_format

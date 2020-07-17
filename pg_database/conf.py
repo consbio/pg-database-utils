@@ -58,8 +58,10 @@ SUPPORTED_CONFIG = frozendict({
 try:
     from django.utils.functional import empty
     EMPTY = empty
+    DJANGO_INSTALLED = True
 except ImportError:
     EMPTY = object()
+    DJANGO_INSTALLED = False
 
 
 class PgDatabaseSettings(object):
@@ -148,10 +150,9 @@ class PgDatabaseSettings(object):
 
         self._django_settings = EMPTY
 
-        try:
-            from django.core.exceptions import ImproperlyConfigured
-
+        if DJANGO_INSTALLED:
             try:
+                from django.core.exceptions import ImproperlyConfigured
                 from django.conf import settings as _django_settings
 
                 # Raises ImproperlyConfigured without DJANGO_SETTINGS_MODULE
@@ -160,8 +161,6 @@ class PgDatabaseSettings(object):
 
             except ImproperlyConfigured as ex:
                 logger.debug(f"Django settings are not configured: {ex}")
-        except ImportError as ex:
-            logger.debug(f"Django is not configured: {ex}")
 
     def _init_database_info(self):
         """

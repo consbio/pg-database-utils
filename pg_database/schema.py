@@ -287,10 +287,10 @@ def create_tsvector_column(table_or_name, column_name, column_names, index_name=
     else:
         table_name = table_or_name.name
 
-    validate_sql_params(table=table_name, column=column_name, column_names=column_names)
-
     if isinstance(column_names, str):
         column_names = [c.strip() for c in column_names.split(",")]
+
+    validate_sql_params(table=table_name, column=column_name, column_names=column_names)
 
     concatenated = "||' '||".join(column_names)
     generate_sql = "\n".join(
