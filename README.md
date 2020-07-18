@@ -174,12 +174,14 @@ schema.create_index(new_table, "val", index_op="to_tsvector")
 sql.query_json_keys(new_table, "json", {"batch": "first"})
 sql.query_tsvector_columns("new_table", "val", "batch first")
 ```
-* Values clause for INSERTs or SELECT INTO, with custom connection arguments at execution time
+* Values clause for `INSERT`s or `SELECT INTO`, with custom connection arguments at execution time
 ```python
 from datetime import datetime
 from sqlalchemy import column
 from sqlalchemy.sql import Insert, Select
 from pg_database import sql, schema
+
+# Prepare data, column names, column types and table name
 
 create_date = datetime.now()
 
@@ -192,13 +194,14 @@ values_names = ["id", "val", "json", "boolean", "created"]
 values_types = ["int", "text", "jsonb", "bool", "date"]
 values_table = "new_table"
 
-# SELECT INTO to create a new table from raw values
+# SELECT INTO to create a new table from raw values using sslmode==require
+
 select_vals = sql.Values(values_names, values_types, *values_data)
 select_into = sql.SelectInto([column(c) for c in values_names], values_table)
 with schema.get_engine(connect_args={"sslmode": "require"}).connect() as conn:
     conn.execute(select_into.select_from(select_vals).execution_options(autocommit=True))
 
-# INSERT INTO to add new records from raw values
+# INSERT INTO to add new records from raw values using sslmode==require
 
 existing_table = schema.get_metadata().tables[values_table]
 
