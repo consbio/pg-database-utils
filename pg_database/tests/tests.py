@@ -1700,7 +1700,6 @@ def test_drop_column(db_metadata):
 
 
 def test_create_tsvector_column(db_metadata):
-    """ Intentionally not covered since it contains a sqlalchemy workaround """
 
     site_table = db_metadata.tables[SITE_TABLE_NAME]
     inject_sql = "DROP USER 'postgres' IF EXISTS"
