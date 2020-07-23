@@ -1244,6 +1244,7 @@ def test_update_rows(db_metadata):
         return row
 
     def update_none(row):
+        """ Skips updates to all rows """
         return None
 
     test_table_name = ALL_TEST_TABLES[1]
