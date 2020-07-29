@@ -28,7 +28,7 @@ DATABASE_PROPS = frozenset({
     "database_user", "user", "username",
     "database_password", "password",
     # Supported database query properties
-    "connect_args", "pooling_args"
+    "connect_args", "pooling_args",
     # Supported django database properties
     "ENGINE", "django_engine",
     "NAME", "django_name",
