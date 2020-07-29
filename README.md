@@ -37,7 +37,8 @@ If you want to specify a particular Django database to read settings from:
 1. Create a JSON configuration file with the database name:
 ```python
 {
-    "django-db-key": "override_default"
+    "django-db-key": "other",               # To override DATABASES["default"]
+    "connect-args": {"sslmode": "require"}  # To override DATABASES["<db_name>"]["OPTIONS"]
 }
 ```
 2. Set the `DATABASE_CONFIG_JSON` environment variable to point to the location of the file
@@ -60,14 +61,20 @@ If you specify a Django database, those database connection settings will be use
 ```
 2. Set the `DATABASE_CONFIG_JSON` environment variable to point to the location of the file
 
-### Regardless of the above
+### Additional configuration with or without Django
 
 Additional configuration options include:
 ```python
 {
     "connect-args": {"sslmode": "require"},  # Defaults to postgres settings, "prefer" by default
     "date-format": "optional",               # Defaults to "%Y-%m-%d"
-    "timestamp-format": "optional"           # Defaults to "%Y-%m-%d %H:%M:%S"
+    "timestamp-format": "optional",          # Defaults to "%Y-%m-%d %H:%M:%S"
+    "pooling-args": {                        # To override sqlalchemy pooling config
+        "max_overflow": 0,                   # Defaults to 10 connections beyond pool size
+        "pool_recycle": 60,                  # Defaults to no timeout (-1) in seconds
+        "pool_size": 20,                     # Defaults to 5 connections
+        "pool_timeout": 30                   # Defaults to 30 seconds
+     }
 }
 ```
 
@@ -202,13 +209,13 @@ select_into = sql.SelectInto([column(c) for c in values_names], values_table)
 with schema.get_engine(connect_args={"sslmode": "require"}).connect() as conn:
     conn.execute(select_into.select_from(select_vals).execution_options(autocommit=True))
 
-# INSERT INTO to add new records from raw values using sslmode==require
+# INSERT INTO to add new records from raw values using custom pooling args
 
 existing_table = schema.get_metadata().tables[values_table]
 
 insert_vals = sql.Values(values_names, values_types, *values_data)
 insert_from = Select([column(c) for c in values_names]).select_from(insert_vals)
 insert_into = Insert(existing_table).from_select(names=values_names, select=insert_from)
-with schema.get_engine(connect_args={"sslmode": "require"}).connect() as conn:
+with schema.get_engine(pooling_args={"pool_size": 20, "max_overflow": 0}).connect() as conn:
     conn.execute(insert_into.execution_options(autocommit=True))
 ```

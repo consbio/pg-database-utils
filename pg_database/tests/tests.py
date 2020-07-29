@@ -474,6 +474,7 @@ def test_conf_settings_props():
     test_settings = conf.PgDatabaseSettings()
 
     assert test_settings.connect_args == {"sslmode": "allow" if django_installed else "prefer"}
+    assert test_settings.pooling_args == {"max_overflow": 10, "pool_recycle": -1, "pool_size": 5, "pool_timeout": 30}
     assert test_settings.django_db_key == "other"
     assert test_settings.date_format == DEFAULT_DATE_FORMAT
     assert test_settings.timestamp_format == DEFAULT_TIMESTAMP_FORMAT
@@ -890,6 +891,13 @@ def test_drop_table(db_metadata):
 
 
 def test_get_engine(db_metadata):
+
+    with pytest.raises(ValueError, match="Invalid pooling params"):
+        schema.get_engine(pooling_args=["not", "a", "dict"])
+    with pytest.raises(ValueError, match="Invalid pooling params"):
+        schema.get_engine(pooling_args={"not": "supported"})
+    with pytest.raises(ValueError, match="Pooling params require integer values"):
+        schema.get_engine(pooling_args={"pool_size": 20, "max_overflow": "nope"})
 
     test_metadata = MetaData(schema.get_engine())
     test_metadata.reflect()

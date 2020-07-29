@@ -27,7 +27,8 @@ DATABASE_PROPS = frozenset({
     "database_host", "host",
     "database_user", "user", "username",
     "database_password", "password",
-    "connect_args",
+    # Supported database query properties
+    "connect_args", "pooling_args"
     # Supported django database properties
     "ENGINE", "django_engine",
     "NAME", "django_name",
@@ -50,6 +51,7 @@ SUPPORTED_CONFIG = frozendict({
     "django-db-key": DEFAULT_DJANGO_DB,
     # Other non-required options:
     "connect-args": None,
+    "pooling-args": None,
     "date-format": DEFAULT_DATE_FORMAT,
     "timestamp-format": DEFAULT_TIMESTAMP_FORMAT,
 })
@@ -86,12 +88,13 @@ class PgDatabaseSettings(object):
         | database-password | PASSWORD | password      | database_password | None           |
 
     This is how other database options are mapped:
-        | config key       | django   | settings property | default values      |
-        |:-----------------|:---------|:------------------|:--------------------|
-        | connect-args     | OPTIONS  | connect_args      | None                |
-        | django-db-key    | None     | django_db_key     | "default"           |
-        | date-format      | None     | date_format       | "%Y-%m-%d"          |
-        | timestamp-format | None     | timestamp_format  | "%Y-%m-%d %H:%M:%S" |
+        | config key       | django   | settings property | default values        |
+        |:-----------------|:---------|:------------------|:----------------------|
+        | connect-args     | OPTIONS  | connect_args      | None                  |
+        | pooling-args     | None     | pooling_args      | <see sqlalchemy docs> |
+        | django-db-key    | None     | django_db_key     | "default"             |
+        | date-format      | None     | date_format       | "%Y-%m-%d"            |
+        | timestamp-format | None     | timestamp_format  | "%Y-%m-%d %H:%M:%S"   |
 
     Of the above, only database-name and database-user are required.
     The others either have defaults or are not required for database connection.

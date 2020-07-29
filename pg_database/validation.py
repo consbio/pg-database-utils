@@ -25,6 +25,25 @@ def validate_columns_in(table, column_names, empty_table, message=None):
         raise ValueError(f"{error_text}: {invalid_columns}")
 
 
+def validate_pooling_params(pooling_params):
+    """ Helper to supported sqlalchemy pooling options """
+
+    supported = ("max_overflow", "pool_recycle", "pool_size", "pool_timeout")
+
+    if not pooling_params:
+        return {}
+    if not isinstance(pooling_params, dict):
+        raise ValueError(f"Invalid pooling params: {pooling_params}")
+    if any(param not in supported for param in pooling_params):
+        invalid_params = ", ".join(set(pooling_params).difference(supported))
+        raise ValueError(f"Invalid pooling params: {invalid_params}")
+    if any(not isinstance(pooling_params[param], int) for param in pooling_params):
+        invalid_params = ", ".join(param for param in pooling_params if not isinstance(pooling_params[param], int))
+        raise ValueError(f"Pooling params require integer values: {invalid_params}")
+
+    return pooling_params
+
+
 def validate_sql_params(empty_message=None, **params):
     """
     Helper for validating parameters to be passed to sqlalchemy for sql injection

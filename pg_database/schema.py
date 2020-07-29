@@ -8,20 +8,26 @@ from sqlalchemy.sql import and_, func, Select
 
 from .conf import settings
 from .types import column_type_for
-from .validation import validate_columns_in, validate_sql_params, SQL_TYPE_REGEX
+from .validation import validate_columns_in, validate_pooling_params, validate_sql_params, SQL_TYPE_REGEX
 
 logger = logging.getLogger(__name__)
 
 
-def get_engine(connect_args=None):
+def get_engine(connect_args=None, pooling_args=None):
     """
     Creates a sqlalchemy engine with settings configured in Django or database config
     :param connect_args: optionally override configured settings with connection args
+    :param pooling_args: optionally override configured settings with pooling args:
+        max_overflow: sqlalchemy defaults to 10 connections beyond pool size
+        pool_recycle: sqlalchemy defaults to no timeout (-1) in seconds
+        pool_size:    sqlalchemy defaults to 5 connections
+        pool_timeout: sqlalchemy defaults to 30 seconds
     :return: a sqlalchemy connection engine
     """
 
     connect_args = connect_args or settings.connect_args
     connect_kwargs = {"connect_args": connect_args} if connect_args else {}
+    connect_kwargs.update(validate_pooling_params(pooling_args or settings.pooling_args))
 
     return create_engine(URL(**settings.database_info), **connect_kwargs)
 
