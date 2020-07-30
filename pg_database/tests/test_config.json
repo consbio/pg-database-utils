@@ -1,5 +1,5 @@
 {
-    "database-name": "pg_database",
+    "database-name": "test_pg_database",
     "django-db-key": "other",
     "connect-args": {"sslmode": "prefer"},
     "pooling-args": {

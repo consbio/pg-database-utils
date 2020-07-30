@@ -7,17 +7,17 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.sql import sqltypes, and_, or_, func, FromClause, Insert, Select, Update
 
-from .schema import get_engine, get_tables, get_table_count, table_exists, drop_table
+from .schema import get_engine, get_table, get_tables, get_table_count, table_exists, drop_table
 from .types import column_type_for, to_date_string, to_json_string
 from .validation import validate_columns_in, validate_sql_params, validate_table_name
 
 logger = logging.getLogger(__name__)
 
 
-def _query_limited(query, limit=None):
+def _query_limited(table, query, limit=None):
     """ Helper to limit query results without the full table scan executed by LIMIT """
 
-    with get_engine().connect() as conn:
+    with table.bind.connect() as conn:
         if limit is None:
             return list(conn.execute(query).fetchall())
 
@@ -48,7 +48,7 @@ def query_json_keys(table_or_name, column_name, query, limit=None):
     """
 
     if isinstance(table_or_name, str):
-        table = get_tables().get(table_or_name)
+        table = get_table(table_or_name)
     else:
         table = table_or_name
 
@@ -61,7 +61,7 @@ def query_json_keys(table_or_name, column_name, query, limit=None):
     else:
         json_query = Select(table.columns).where(json_op(query))
 
-    return _query_limited(json_query, limit)
+    return _query_limited(table, json_query, limit)
 
 
 def query_tsvector_columns(table_or_name, column_names, query, limit=None):
@@ -80,7 +80,7 @@ def query_tsvector_columns(table_or_name, column_names, query, limit=None):
     """
 
     if isinstance(table_or_name, str):
-        table = get_tables().get(table_or_name)
+        table = get_table(table_or_name)
     else:
         table = table_or_name
 
@@ -100,7 +100,7 @@ def query_tsvector_columns(table_or_name, column_names, query, limit=None):
         postgresql_regconfig="english",
     )
 
-    return _query_limited(Select(table.columns).distinct().where(search_condition), limit)
+    return _query_limited(table, Select(table.columns).distinct().where(search_condition), limit)
 
 
 def update_from(table_name, into_table_name, join_columns, target_columns=None):
@@ -113,7 +113,7 @@ def update_from(table_name, into_table_name, join_columns, target_columns=None):
     :param target_columns: an optional reduced list of column names to target for updates
     """
 
-    both_tables = get_tables([table_name, into_table_name])
+    both_tables = get_tables()
     from_table = both_tables.get(table_name)
     into_table = both_tables.get(into_table_name)
 
@@ -173,7 +173,7 @@ def update_from(table_name, into_table_name, join_columns, target_columns=None):
 
     logger.info(log_message + f", joining on: {join_columns}")
 
-    with get_engine().connect() as conn:
+    with from_table.bind.connect() as conn:
         conn.execute(update_from.execution_options(autocommit=True))
 
 
@@ -192,7 +192,7 @@ def update_rows(table_name, join_columns, target_columns, update_row, batch_size
     :param batch_size: an optional number of rows to execute per batch; all rows by default
     """
 
-    table = get_tables().get(table_name)
+    table = get_table(table_name)
 
     if isinstance(join_columns, str):
         join_columns = [c.strip() for c in join_columns.split(",")]
@@ -234,7 +234,7 @@ def update_rows(table_name, join_columns, target_columns, update_row, batch_size
     tmp_table_name = f"tmp_{table_name}"
 
     try:
-        with get_engine().connect() as conn:
+        with table.bind.connect() as conn:
             logger.info(f"update_rows: updating {table_name} with modified values in batches of {batch_size}\n")
 
             select_query = conn.execute(Select(data_cols).execution_options(stream_results=True))
@@ -285,7 +285,7 @@ def insert_from(table_name, into_table_name, column_names=None, join_columns=Non
     :param create_if_not_exists: if True, create into_table_name if it doesn't exist, otherwise exit with warning
     """
 
-    both_tables = get_tables([table_name, into_table_name])
+    both_tables = get_tables()
     from_table = both_tables.get(table_name)
     into_table = both_tables.get(into_table_name)
 
@@ -358,7 +358,7 @@ def insert_from(table_name, into_table_name, column_names=None, join_columns=Non
     logger.info(log_message)
 
     insert_from = Insert(into_table).from_select(names=[c.name for c in insert_cols], select=insert_vals)
-    with get_engine().connect() as conn:
+    with from_table.bind.connect() as conn:
         conn.execute(insert_from.execution_options(autocommit=True))
 
 
@@ -374,11 +374,9 @@ def insert_into(table_name, values, column_names, create_if_not_exists=False, in
         example values: [(0, 42, 'first'), (True, 86, 'next'), (1, -4, 'last')]
     """
 
-    into_table = get_tables().get(table_name)
+    into_table = get_table(table_name, ignore_missing=create_if_not_exists)
 
     if not table_exists(into_table):
-        if not create_if_not_exists:
-            raise ValueError(f"No table named {table_name} to insert into")
         return select_into(table_name, values, column_names, inspect=inspect)
 
     if isinstance(column_names, str):
@@ -404,7 +402,7 @@ def insert_into(table_name, values, column_names, create_if_not_exists=False, in
     insert_vals = Select(insert_cols).select_from(Values(column_names, column_types, *values))
     insert_into = Insert(into_table).from_select(names=column_names, select=insert_vals)
 
-    with get_engine().connect() as conn:
+    with into_table.bind.connect() as conn:
         conn.execute(insert_into.execution_options(autocommit=True))
 
 
@@ -417,7 +415,7 @@ def select_from(table_name, into_table_name, column_names=None):
     :param column_names: an optional reduced list of column names to specify for insertion
     """
 
-    from_table = get_tables().get(table_name)
+    from_table = get_table(table_name)
 
     validate_table_name(from_table, table_name)
     if table_exists(into_table_name):
@@ -446,7 +444,7 @@ def select_from(table_name, into_table_name, column_names=None):
     logger.info(log_message)
 
     select_from = SelectInto(select_cols, into_table_name).select_from(from_table)
-    with get_engine().connect() as conn:
+    with from_table.bind.connect() as conn:
         conn.execute(select_from.execution_options(autocommit=True))
 
 

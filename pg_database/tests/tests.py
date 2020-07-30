@@ -484,7 +484,7 @@ def test_conf_settings_props():
     test_settings = conf.PgDatabaseSettings()
 
     conf_engine = DEFAULT_ENGINE
-    conf_name = "pg_database"
+    conf_name = "test_pg_database"
     conf_port = DEFAULT_PORT
     conf_host = None
     conf_user = "django" if django_installed else DEFAULT_USER
@@ -885,9 +885,15 @@ def test_drop_table(db_metadata):
     schema.drop_table(SITE_TABLE_NAME)
     assert SITE_TABLE_NAME not in refresh_metadata(db_metadata).tables
 
-    # Should raise no errors
+    # Test checkfirst param
+
     schema.drop_table(site_table)
+    with pytest.raises(ValueError, match="No table named"):
+        schema.drop_table(site_table, checkfirst=False)
+
     schema.drop_table(site_table.name)
+    with pytest.raises(ValueError, match="No table named"):
+        schema.drop_table(site_table.name, checkfirst=False)
 
 
 def test_get_engine(db_metadata):
@@ -903,22 +909,34 @@ def test_get_engine(db_metadata):
     test_metadata.reflect()
     assert sorted(test_metadata.tables) == sorted(db_metadata.tables)
 
-    test_metadata = MetaData(schema.get_engine(connect_args={"sslmode": "require"}))
+    test_metadata = MetaData(schema.get_engine(
+        connect_args={"sslmode": "require"},
+        pooling_args={"pool_size": 20, "max_overflow": 0},
+    ))
     test_metadata.reflect()
     assert sorted(test_metadata.tables) == sorted(db_metadata.tables)
 
 
 def test_get_metadata(db_metadata):
 
+    with pytest.raises(ValueError, match="Invalid pooling params"):
+        schema.get_metadata(pooling_args={"not": "supported"})
+    with pytest.raises(ValueError, match="Pooling params require integer values"):
+        schema.get_metadata(pooling_args={"pool_size": 20, "max_overflow": "nope"})
+
     test_metadata = schema.get_metadata()
     assert sorted(test_metadata.tables) == sorted(db_metadata.tables)
 
-    test_metadata = schema.get_metadata(connect_args={"sslmode": "require"})
+    test_metadata = schema.get_metadata(
+        connect_args={"sslmode": "require"},
+        pooling_args={"pool_size": 20, "max_overflow": 0},
+    )
     assert sorted(test_metadata.tables) == sorted(db_metadata.tables)
 
 
 def test_get_table(db_metadata):
 
+    schema.get_table("nope", ignore_missing=True)
     with pytest.raises(ValueError, match="No table named"):
         schema.get_table("nope")
 
@@ -1404,6 +1422,10 @@ def test_table_exists(db_metadata):
     assert not schema.table_exists(None)
     assert not schema.table_exists("nope")
 
+    site_table = existing.get(SITE_TABLE_NAME)
+    site_table.drop()
+    assert not schema.table_exists(site_table)
+
 
 def test_create_foreign_key(db_metadata):
 
@@ -1448,17 +1470,19 @@ def test_drop_foreign_key(db_metadata):
 
     # Test with invalid parameters
 
+    schema.drop_foreign_key("nope", "pk", checkfirst=True)
     with pytest.raises(ValueError, match="No table named"):
         schema.drop_foreign_key("nope", "pk")
+
+    schema.drop_foreign_key(site_table.name, "nope", checkfirst=True)
     with pytest.raises(ValueError, match="No such foreign key in table"):
         schema.drop_foreign_key(site_table.name, "nope")
 
-    test_columns = ("pk", "obj_order", "obj_hash")
-
     # Create an empty test table to link with foreign keys
 
-    test_table = make_table(db_metadata, test_table_name, test_columns)
-    assert_table(db_metadata, test_table.name, test_columns)
+    test_cols = ("pk", "obj_order", "obj_hash")
+    test_table = make_table(db_metadata, test_table_name, test_cols)
+    assert_table(db_metadata, test_table.name, test_cols)
 
     fk1 = ForeignKeyConstraint(
         columns=[test_table.columns.pk],

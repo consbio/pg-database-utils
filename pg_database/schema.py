@@ -32,14 +32,15 @@ def get_engine(connect_args=None, pooling_args=None):
     return create_engine(URL(**settings.database_info), **connect_kwargs)
 
 
-def get_metadata(connect_args=None):
+def get_metadata(connect_args=None, pooling_args=None):
     """
     Instantiates sqlalchemy metadata with settings configured in Django or database config
     :param connect_args: optionally override configured settings with connection args
+    :param pooling_args: see docstring on schema.get_engine
     :return: a sqlalchemy.sql.Metadata object
     """
 
-    metadata = MetaData(get_engine(connect_args))
+    metadata = MetaData(get_engine(connect_args, pooling_args))
     metadata.reflect()
     return metadata
 
@@ -47,7 +48,7 @@ def get_metadata(connect_args=None):
 # Table utilities
 
 
-def get_table(table_name):
+def get_table(table_name, ignore_missing=False):
     """
     Auto-load a table schema from the database
     :param table_name: the name of the table to load
@@ -59,7 +60,10 @@ def get_table(table_name):
     try:
         return Table(table_name, MetaData(engine), autoload=True, autoload_with=engine)
     except exc.NoSuchTableError:
-        raise ValueError(f'No table named "{table_name}"')
+        if ignore_missing:
+            logger.warning(f"get_table: no table named {table_name}")
+            return None
+        raise ValueError(f"No table named {table_name}")
 
 
 def get_table_count(table_or_name):
@@ -105,11 +109,11 @@ def table_exists(table_or_name):
     """
 
     if isinstance(table_or_name, str):
-        table = get_tables().get(table_or_name)
+        table = get_table(table_or_name, ignore_missing=True)
     else:
         table = table_or_name
 
-    return table is not None and table.exists
+    return table is not None and table.exists()
 
 
 def create_table(table_name, index_cols=None, dropfirst=True, **column_types):
@@ -166,22 +170,27 @@ def create_table(table_name, index_cols=None, dropfirst=True, **column_types):
     return table
 
 
-def drop_table(table_or_name):
+def drop_table(table_or_name, checkfirst=True):
     """
     Drops a table if it exists in the database; if not a warning is logged
     :param table_or_name: a sqlalchemy table object or the name of a table to drop
+    :param checkfirst: if True, log warnings for missing table; otherwise raise ValueError
     """
 
     if isinstance(table_or_name, str):
-        table = get_tables().get(table_or_name)
+        table = get_table(table_or_name, ignore_missing=checkfirst)
     else:
         table = table_or_name
 
-    if table is None:
+    exists = table is not None and table.exists()
+
+    if not checkfirst and not exists:
+        raise ValueError(f"No table named {table_or_name}")
+    elif not exists:
         logger.warning(f"drop_table: no table found named {table_or_name}")
     else:
         logger.info(f"drop_table: dropping table named {table.name}")
-        table.drop(checkfirst=True)
+        table.drop(checkfirst=checkfirst)
 
 
 # Column utilities
@@ -204,8 +213,10 @@ def alter_column_type(table_or_name, column_name, new_type, using=None):
 
     if isinstance(table_or_name, str):
         table_name = table_or_name
+        sql_engine = get_engine()
     else:
         table_name = table_or_name.name
+        sql_engine = table_or_name.bind
 
     validate_sql_params(table=table_name, column=column_name)
 
@@ -226,7 +237,7 @@ def alter_column_type(table_or_name, column_name, new_type, using=None):
 
     logger.info(f"alter_column_type: altering {table_name}.{column_name} to {new_type}")
 
-    with get_engine().connect() as conn:
+    with sql_engine.connect() as conn:
         conn.execute(text(alter_sql).execution_options(autocommit=True))
 
 
@@ -239,15 +250,17 @@ def create_column(table_or_name, column_name, column_type, checkfirst=False, def
         * may be a string indicating the type
         * may also be a class defined in sqlalchemy.sql.sqltypes
         * see types.COLUMN_TYPE_MAP for string values that map to types
-    :param checkfirst: check if column exists if True, otherwise raise a sqlalchemy error if column exists
+    :param checkfirst: if True, log warning if column exists; otherwise raise a sqlalchemy error
     :param default: a default value to assign to the column
     :param nullable: make the column support NULL if True, otherwise NOT NULL
     """
 
     if isinstance(table_or_name, str):
         table_name = table_or_name
+        sql_engine = get_engine()
     else:
         table_name = table_or_name.name
+        sql_engine = table_or_name.bind
 
     validate_sql_params(table=table_name, column=column_name)
     if not column_type or not SQL_TYPE_REGEX.match(column_type):
@@ -276,7 +289,7 @@ def create_column(table_or_name, column_name, column_type, checkfirst=False, def
     )
     logger.info(f"create_column: creating {table_name}.{column_name} as {column_type}")
 
-    with get_engine().connect() as conn:
+    with sql_engine.connect() as conn:
         conn.execute(text(create_sql).execution_options(autocommit=True))
 
 
@@ -290,8 +303,10 @@ def create_tsvector_column(table_or_name, column_name, column_names, index_name=
 
     if isinstance(table_or_name, str):
         table_name = table_or_name
+        sql_engine = get_engine()
     else:
         table_name = table_or_name.name
+        sql_engine = table_or_name.bind
 
     if isinstance(column_names, str):
         column_names = [c.strip() for c in column_names.split(",")]
@@ -310,7 +325,7 @@ def create_tsvector_column(table_or_name, column_name, column_names, index_name=
     )
     logger.info(f"create_tsvector_column: executing generate column query:\n{generate_sql}")
 
-    with get_engine().connect() as conn:
+    with sql_engine.connect() as conn:
         conn.execute(generate_sql)
 
     create_index(table_or_name, column_names, index_name, "to_tsvector")
@@ -326,8 +341,10 @@ def drop_column(table_or_name, column_name, checkfirst=False):
 
     if isinstance(table_or_name, str):
         table_name = table_or_name
+        sql_engine = get_engine()
     else:
         table_name = table_or_name.name
+        sql_engine = table_or_name.bind
 
     validate_sql_params(table=table_name, column=column_name)
 
@@ -338,7 +355,7 @@ def drop_column(table_or_name, column_name, checkfirst=False):
 
     logger.info(f"drop_column: dropping {table_name}.{column_name}")
 
-    with get_engine().connect() as conn:
+    with sql_engine.connect() as conn:
         conn.execute(text(drop_sql).execution_options(autocommit=True))
 
 
@@ -366,7 +383,7 @@ def create_index(table_or_name, column_names, index_name=None, index_op=None):
     """
 
     if isinstance(table_or_name, str):
-        table = get_tables().get(table_or_name)
+        table = get_table(table_or_name)
     else:
         table = table_or_name
 
@@ -433,7 +450,7 @@ def drop_index(table_or_name, index_name=None, column_names=None, ignore_errors=
     """
 
     if isinstance(table_or_name, str):
-        table = get_tables().get(table_or_name)
+        table = get_table(table_or_name, ignore_missing=ignore_errors)
     else:
         table = table_or_name
 
@@ -480,8 +497,10 @@ def has_index(table_or_name, index_name):
 
     if isinstance(table_or_name, str):
         table_name = table_or_name
+        sql_engine = get_engine()
     else:
         table_name = table_or_name.name
+        sql_engine = table_or_name.bind
 
     index_query = (
         Select([literal_column("1")], distinct=True)
@@ -489,7 +508,7 @@ def has_index(table_or_name, index_name):
         .where(and_(column("tablename") == table_name, column("indexname") == index_name))
     )
 
-    with get_engine().connect() as conn:
+    with sql_engine.connect() as conn:
         return bool(conn.execute(index_query).first())
 
 
@@ -529,20 +548,23 @@ def create_foreign_key(table_or_name, column_name, related_column_or_name):
         ddl.execute(table.bind, ddl.target)
 
 
-def drop_foreign_key(table_or_name, fk_or_name):
+def drop_foreign_key(table_or_name, fk_or_name, checkfirst=False):
     """
     Drops a foreign key for a specified table if it exists
-
     :param table_or_name: a sqlalchemy table object or the name of a table
     :param fk_or_name: a sqlalchemy foreign key constraint, or the name of one
+    :param checkfirst: if True, log warnings for missing table or FK; otherwise raise ValueError
     """
 
     if isinstance(table_or_name, str):
-        table = get_tables().get(table_or_name)
+        table = get_table(table_or_name, ignore_missing=checkfirst)
     else:
         table = table_or_name
 
     if table is None:
+        if checkfirst:
+            logger.info(f"drop_foreign_key: no table named {table_or_name}")
+            return
         raise ValueError(f"No table named {table_or_name}")
 
     if not isinstance(fk_or_name, str):
@@ -552,6 +574,9 @@ def drop_foreign_key(table_or_name, fk_or_name):
         fk = fks.get(fk_or_name.lower())
 
     if fk is None:
+        if checkfirst:
+            logger.info(f"drop_foreign_key: no such foreign key in table {table.name}")
+            return
         raise ValueError(f"No such foreign key in table {table.name}")
 
     logger.info(f"drop_foreign_key: dropping FK to {fk.name} from table {table.name}")
