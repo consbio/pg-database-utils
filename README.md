@@ -157,13 +157,10 @@ from pg_database import sql
 
 def update_row(row):
     row = list(row)
-
     pk, val, created, jval = row[0], row[1], row[2], row[3]
-
     row[1] = f"{pk} {val} first batch"
     row[2] = created + timedelta(days=1)
     row[3] = {"id": pk, "val": val, "batch": "first"}
-
     return row
 
 sql.update_rows("new_table", "id", "val,created,json", update_row, batch_size=3)
