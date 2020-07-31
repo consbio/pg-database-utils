@@ -103,7 +103,7 @@ def query_tsvector_columns(table_or_name, column_names, query, limit=None):
     return _query_limited(table, Select(table.columns).distinct().where(search_condition), limit)
 
 
-def update_from(table_name, into_table_name, join_columns, target_columns=None):
+def update_from(table_name, into_table_name, join_columns, target_columns=None, engine=None):
     """
     Updates records in one table from values in another
 
@@ -111,9 +111,10 @@ def update_from(table_name, into_table_name, join_columns, target_columns=None):
     :param into_table_name: the name of the table to be updated
     :param join_columns: one or more column names that constitute unique records for joining
     :param target_columns: an optional reduced list of column names to target for updates
+    :param engine: an optional sqlalchemy.engine to use in the UPDATE query
     """
 
-    both_tables = get_tables()
+    both_tables = get_tables(engine=engine)
     from_table = both_tables.get(table_name)
     into_table = both_tables.get(into_table_name)
 
@@ -177,7 +178,7 @@ def update_from(table_name, into_table_name, join_columns, target_columns=None):
         conn.execute(update_from.execution_options(autocommit=True))
 
 
-def update_rows(table_name, join_columns, target_columns, update_row, batch_size=-1):
+def update_rows(table_name, join_columns, target_columns, update_row, batch_size=-1, engine=None):
     """
     Updates records in the given table with custom modified values.
 
@@ -190,9 +191,10 @@ def update_rows(table_name, join_columns, target_columns, update_row, batch_size
         If None, that row will be left unmodified in the original table.
         Incoming rows are sqlalchemy records: they are read-only unless converted to lists.
     :param batch_size: an optional number of rows to execute per batch; all rows by default
+    :param engine: an optional sqlalchemy.engine to use in the UPDATE query
     """
 
-    table = get_table(table_name)
+    table = get_table(table_name, engine)
 
     if isinstance(join_columns, str):
         join_columns = [c.strip() for c in join_columns.split(",")]
@@ -252,9 +254,9 @@ def update_rows(table_name, join_columns, target_columns, update_row, batch_size
                 if not rows_to_send:
                     continue
                 elif table_created:
-                    insert_into(tmp_table_name, rows_to_send, column_names, inspect=False)
+                    insert_into(tmp_table_name, rows_to_send, column_names, inspect=False, engine=engine)
                 else:
-                    select_into(tmp_table_name, rows_to_send, column_names, col_types, inspect=False)
+                    select_into(tmp_table_name, rows_to_send, column_names, col_types, inspect=False, engine=engine)
                     table_created = True
 
                 logger.info(f"update_rows:\tprocessed {done_count} of {table_count} rows\n")
@@ -269,12 +271,14 @@ def update_rows(table_name, join_columns, target_columns, update_row, batch_size
             else:
                 logger.info(f"update_rows:\tapplying changes to only {update_count} of {table_count} rows")
 
-            update_from(tmp_table_name, table_name, join_columns, target_columns)
+            update_from(tmp_table_name, table_name, join_columns, target_columns, engine=engine)
     finally:
         drop_table(tmp_table_name)
 
 
-def insert_from(table_name, into_table_name, column_names=None, join_columns=None, create_if_not_exists=False):
+def insert_from(
+    table_name, into_table_name, column_names=None, join_columns=None, create_if_not_exists=False, engine=None
+):
     """
     Inserts records from one table into another
 
@@ -283,9 +287,10 @@ def insert_from(table_name, into_table_name, column_names=None, join_columns=Non
     :param column_names: an optional reduced list of column names to specify for insertion
     :param join_columns: one or more column names that constitute unique records, not to be inserted
     :param create_if_not_exists: if True, create into_table_name if it doesn't exist, otherwise exit with warning
+    :param engine: an optional sqlalchemy.engine to use in the UPDATE query
     """
 
-    both_tables = get_tables()
+    both_tables = get_tables(engine=engine)
     from_table = both_tables.get(table_name)
     into_table = both_tables.get(into_table_name)
 
@@ -294,7 +299,7 @@ def insert_from(table_name, into_table_name, column_names=None, join_columns=Non
     if not table_exists(into_table):
         if not create_if_not_exists:
             raise ValueError(f"No table named {into_table_name} to insert into")
-        return select_from(table_name, into_table_name, column_names)
+        return select_from(table_name, into_table_name, column_names, engine=engine)
 
     # Validate parameters for excluding unique records
 
@@ -362,7 +367,7 @@ def insert_from(table_name, into_table_name, column_names=None, join_columns=Non
         conn.execute(insert_from.execution_options(autocommit=True))
 
 
-def insert_into(table_name, values, column_names, create_if_not_exists=False, inspect=True):
+def insert_into(table_name, values, column_names, create_if_not_exists=False, inspect=True, engine=None):
     """
     Inserts a list of values into an existing table
 
@@ -372,12 +377,15 @@ def insert_into(table_name, values, column_names, create_if_not_exists=False, in
         * column names must correspond exactly to the order of the values provided
         example names:  'col1,col2,col3' OR ['col1', 'col2', 'col3']
         example values: [(0, 42, 'first'), (True, 86, 'next'), (1, -4, 'last')]
+    :param create_if_not_exists: if True, create table_name if it doesn't exist, otherwise exit with warning
+    :param inspect: if True, ensure all value rows correspond to the number of column names
+    :param engine: an optional sqlalchemy.engine to use in the INSERT query
     """
 
-    into_table = get_table(table_name, ignore_missing=create_if_not_exists)
+    into_table = get_table(table_name, engine, ignore_missing=create_if_not_exists)
 
     if not table_exists(into_table):
-        return select_into(table_name, values, column_names, inspect=inspect)
+        return select_into(table_name, values, column_names, inspect=inspect, engine=engine)
 
     if isinstance(column_names, str):
         column_names = column_names.split(",")
@@ -406,16 +414,17 @@ def insert_into(table_name, values, column_names, create_if_not_exists=False, in
         conn.execute(insert_into.execution_options(autocommit=True))
 
 
-def select_from(table_name, into_table_name, column_names=None):
+def select_from(table_name, into_table_name, column_names=None, engine=None):
     """
-    Inserts records from a table into a new table
+    Inserts records from a table into a new table via SELECT INTO
 
     :param table_name: the name of the table from which to insert records
     :param into_table_name: the name of the new table into which the records will go
     :param column_names: an optional reduced list of column names to specify for insertion
+    :param engine: an optional sqlalchemy.engine to use in the SELECT INTO query
     """
 
-    from_table = get_table(table_name)
+    from_table = get_table(table_name, engine)
 
     validate_table_name(from_table, table_name)
     if table_exists(into_table_name):
@@ -448,9 +457,9 @@ def select_from(table_name, into_table_name, column_names=None):
         conn.execute(select_from.execution_options(autocommit=True))
 
 
-def select_into(table_name, values, column_names, column_types=None, inspect=True):
+def select_into(table_name, values, column_names, column_types=None, inspect=True, engine=None):
     """
-    Inserts a list of values into a new table
+    Inserts a list of values into a new table via SELECT INTO
 
     :param table_name: the name of the table to create from the values provided
     :param values: a list of lists containing literal values to insert into the table
@@ -464,6 +473,8 @@ def select_into(table_name, values, column_names, column_types=None, inspect=Tru
         example names:  'col1,col2,col3' OR ['col1', 'col2', 'col3']
         example types:  'bool,int,varchar' OR ['bool', 'int', 'varchar']
         example values: [(0, 42, 'first'), (True, 86, 'next'), (1, -4, 'last')]
+    :param inspect: if True, ensure all value rows correspond to the number of column names
+    :param engine: an optional sqlalchemy.engine to use in the SELECT INTO query
     """
 
     if table_exists(table_name):
@@ -493,7 +504,7 @@ def select_into(table_name, values, column_names, column_types=None, inspect=Tru
     select_from = Values(column_names, column_types, *values)
     select_into = SelectInto(select_cols, table_name).select_from(select_from)
 
-    with get_engine().connect() as conn:
+    with (get_engine() if engine is None else engine).connect() as conn:
         conn.execute(select_into.execution_options(autocommit=True))
 
 

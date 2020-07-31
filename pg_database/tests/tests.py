@@ -29,6 +29,7 @@ DEFAULT_USER = conf.DEFAULT_USER
 DEFAULT_DJANGO_DB = conf.DEFAULT_DJANGO_DB
 DEFAULT_DATE_FORMAT = conf.DEFAULT_DATE_FORMAT
 DEFAULT_TIMESTAMP_FORMAT = conf.DEFAULT_TIMESTAMP_FORMAT
+POSTGIS_TABLE_NAME = "spatial_ref_sys"
 
 DATABASE_INFO = conf.settings.database_info
 DATABASE_NAME = conf.settings.database_name
@@ -847,18 +848,31 @@ def test_create_table(db_metadata):
             tmp_table_name, index_cols={"col": "unique", "nope": "unique"}, col="string", dropfirst=True
         )
 
-    # Test with no indexes
+    column_types = dict(SITE_COL_TYPES)
+    column_types["_engine"] = postgresql.json.JSON
+    target_types = dict(column_types)
+    target_types["engine"] = target_types.pop("_engine")
 
-    schema.create_table(table_name, dropfirst=True, **SITE_COL_TYPES)
-    assert_table(db_metadata, table_name, SITE_COL_TYPES)
+    # Test with no indexes and site columns
+
+    schema.create_table(table_name, dropfirst=True, **column_types)
+    assert_table(db_metadata, table_name, target_types)
+    assert not refresh_metadata(db_metadata).tables[table_name].indexes
+
+    # Test with no indexes, with engine provided
+
+    refresh_metadata(db_metadata).tables[table_name].drop()
+
+    schema.create_table(table_name, dropfirst=True, engine=db_metadata.bind, **column_types)
+    assert_table(db_metadata, table_name, target_types)
     assert not refresh_metadata(db_metadata).tables[table_name].indexes
 
     # Test with string of index columns
 
     refresh_metadata(db_metadata).tables[table_name].drop()
 
-    schema.create_table(table_name, index_cols="pk,obj_order", **SITE_COL_TYPES)
-    assert_table(db_metadata, table_name, SITE_COL_TYPES)
+    schema.create_table(table_name, index_cols="pk,obj_order", **column_types)
+    assert_table(db_metadata, table_name, target_types)
     assert_index(db_metadata, table_name, index_name=f"{table_name}_pk_obj_order_idx")
 
     # Test with list of index columns
@@ -869,9 +883,9 @@ def test_create_table(db_metadata):
         table_name,
         index_cols=["pk", "obj_order"],
         dropfirst=False,
-        **{k: v.__name__ for k, v in SITE_COL_TYPES.items()}
+        **{k: v.__name__ for k, v in column_types.items()}
     )
-    assert_table(db_metadata, table_name, SITE_COL_TYPES)
+    assert_table(db_metadata, table_name, target_types)
     assert_index(db_metadata, table_name, index_name=f"{table_name}_pk_idx")
     assert_index(db_metadata, table_name, index_name=f"{table_name}_obj_order_idx")
 
@@ -883,9 +897,9 @@ def test_create_table(db_metadata):
         table_name,
         index_cols={"pk": "unique", "obj_order": "unique", "pk,obj_order": "unique"},
         dropfirst=False,
-        **{k: v() for k, v in SITE_COL_TYPES.items()}
+        **{k: v() for k, v in column_types.items()}
     )
-    assert_table(db_metadata, table_name, SITE_COL_TYPES)
+    assert_table(db_metadata, table_name, target_types)
     assert_index(db_metadata, table_name, index_name=f"{table_name}_pk_unique_idx")
     assert_index(db_metadata, table_name, index_name=f"{table_name}_obj_order_unique_idx")
     assert_index(db_metadata, table_name, index_name=f"{table_name}_pk_obj_order_unique_idx")
@@ -1002,6 +1016,7 @@ def test_get_table(db_metadata):
 
     # Test for existance of custom table
     assert schema.get_table(SITE_TABLE_NAME).exists
+    assert schema.get_table(POSTGIS_TABLE_NAME, engine=db_metadata.bind).exists
 
 
 def test_get_table_count(db_metadata):
@@ -1042,6 +1057,15 @@ def test_get_tables(db_metadata):
     assert table_name in some_tables
     assert some_tables[table_name].exists
 
+    # Test for existance of multiple tables when engine is provided
+
+    some_tables = schema.get_tables((f"{POSTGIS_TABLE_NAME}", f"{table_name}"), engine=db_metadata.bind)
+
+    assert len(some_tables) == 2
+    assert table_name in some_tables
+    assert POSTGIS_TABLE_NAME in some_tables
+    assert some_tables[table_name].exists
+
 
 def test_insert_from(db_metadata):
 
@@ -1078,8 +1102,10 @@ def test_insert_from(db_metadata):
     sql.insert_from(from_table_name, into_table_name, "ignore,these", create_if_not_exists=True)
     assert into_table_name not in refresh_metadata(db_metadata).tables
 
-    # Test that table is created with subset of columns if it doesn't exist
-    sql.insert_from(from_table_name, into_table_name, target_columns, create_if_not_exists=True)
+    # Test that table is created with subset of columns if it doesn't exist, withe engine provided
+    sql.insert_from(
+        from_table_name, into_table_name, target_columns, create_if_not_exists=True, engine=db_metadata.bind
+    )
     assert_table(db_metadata, into_table_name, target_columns)
     assert_records(db_metadata, into_table_name, SITE_DATA_DICT)
 
@@ -1148,9 +1174,9 @@ def test_insert_into(db_metadata):
     for inserted in refresh_metadata(db_metadata).tables[into_table_name].columns:
         assert str(inserted.type).lower() == "text"
 
-    # Test insert duplicate records into existing table
+    # Test insert duplicate records into existing table, with engine provided
 
-    sql.insert_into(into_table_name, insert_vals, target_cols)
+    sql.insert_into(into_table_name, insert_vals, target_cols, engine=db_metadata.bind)
     target_count = len(target_vals) * 2
     assert_table(db_metadata, into_table_name, target_cols)
     assert_records(db_metadata, into_table_name, target_data, target_cols, target_count)
@@ -1172,8 +1198,8 @@ def test_select_from(db_metadata):
     sql.select_from(from_table_name, into_table_name, "ignore,these")
     assert into_table_name not in refresh_metadata(db_metadata).tables
 
-    # Test with asterisk to insert all columns
-    sql.select_from(from_table_name, into_table_name, "*")
+    # Test with asterisk to insert all columns, with engine provided
+    sql.select_from(from_table_name, into_table_name, "*", engine=db_metadata.bind)
     assert_table(db_metadata, into_table_name, SITE_TABLE_COLS)
     assert_records(db_metadata, into_table_name, SITE_DATA_DICT)
 
@@ -1234,7 +1260,7 @@ def test_select_into(db_metadata):
         SITE_COL_TYPES.get(col, sqltypes.Text).__visit_name__ for col in target_cols
     ]
 
-    # Test insert with no types specified (
+    # Test insert with no types specified
 
     sql.select_into(into_table_name, insert_vals, ",".join(target_cols))
     assert_table(db_metadata, into_table_name, target_cols)
@@ -1243,13 +1269,13 @@ def test_select_into(db_metadata):
     for inserted in refresh_metadata(db_metadata).tables[into_table_name].columns:
         assert str(inserted.type).lower() == "text"
 
-    # Test insert with specific type names
+    # Test insert with specific type names, with engine provided
 
     refresh_metadata(db_metadata).tables[into_table_name].drop()
 
     target_data = {p["pk"]: p for p in SITE_TEST_DATA}
 
-    sql.select_into(into_table_name, insert_vals, target_cols, insert_types)
+    sql.select_into(into_table_name, insert_vals, target_cols, insert_types, engine=db_metadata.bind)
     assert_table(db_metadata, into_table_name, target_cols)
     assert_records(db_metadata, into_table_name, target_data, target_cols)
 
@@ -1291,8 +1317,8 @@ def test_update_from(db_metadata):
     assert_table(db_metadata, into_table_name, SITE_TABLE_COLS)
     assert_records(db_metadata, into_table_name, test_data)
 
-    # Test that all records are updated by join on target columns
-    sql.update_from(from_table_name, into_table_name, ",".join(join_cols))
+    # Test that all records are updated by join on target columns, with engine provided
+    sql.update_from(from_table_name, into_table_name, ",".join(join_cols), engine=db_metadata.bind)
     assert_records(db_metadata, into_table_name, orig_data)
 
     # Reset the updated table to mangled values for next test
@@ -1382,9 +1408,9 @@ def test_update_rows(db_metadata):
     assert_table(db_metadata, test_table_name, test_cols)
     assert_records(db_metadata, test_table_name, test_data)
 
-    # Test updating all the rows in data table
+    # Test updating all the rows in data table, with engine provided
 
-    sql.update_rows(test_table_name, "pk", target_cols, update_zips, batch_size=3)
+    sql.update_rows(test_table_name, "pk", target_cols, update_zips, batch_size=3, engine=db_metadata.bind)
 
     target_data = {}
     for pk, record in copy.deepcopy(test_data).items():

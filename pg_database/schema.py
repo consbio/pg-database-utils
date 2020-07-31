@@ -40,7 +40,17 @@ def get_metadata(connect_args=None, pooling_args=None):
     :return: a sqlalchemy.sql.Metadata object
     """
 
-    metadata = MetaData(get_engine(connect_args, pooling_args))
+    return _get_metadata(get_engine(connect_args, pooling_args))
+
+
+def _get_metadata(meta_or_engine):
+    """
+    A helper to create or sync a metadata object with the database after structural changes
+    :param meta_or_engine: an existing metadata to sync, or a sqlalchemy.engine to wrap
+    :return: a new sqlalchemy.sql.Metadata object reflecting the current database structure
+    """
+
+    metadata = MetaData(getattr(meta_or_engine, "bind", meta_or_engine))
     metadata.reflect()
     return metadata
 
@@ -48,17 +58,19 @@ def get_metadata(connect_args=None, pooling_args=None):
 # Table utilities
 
 
-def get_table(table_name, ignore_missing=False):
+def get_table(table_name, engine=None, ignore_missing=False):
     """
     Auto-load a table schema from the database
     :param table_name: the name of the table to load
+    :param engine: an optional sqlalchemy.engine to use in the table query
+    :param ignore_missing: if True, return None for missing table; otherwise raise ValueError
     :return: an existing sqlalchemy table, or raise ValueError if table doesn't exist
     """
 
-    engine = get_engine()
+    metadata = _get_metadata(get_engine() if engine is None else engine)
 
     try:
-        return Table(table_name, MetaData(engine), autoload=True, autoload_with=engine)
+        return Table(table_name, metadata, autoload=True, autoload_with=metadata.bind)
     except exc.NoSuchTableError:
         if ignore_missing:
             logger.warning(f"get_table: no table named {table_name}")
@@ -81,17 +93,15 @@ def get_table_count(table_or_name):
     return select([func.count()]).select_from(table).scalar()
 
 
-def get_tables(table_names=None):
+def get_tables(table_names=None, engine=None):
     """
     Queries one or more sqlalchemy table objects from the database if they exist.
     :param table_names: optional comma-seperated column names, or a list of column names
+    :param engine: an optional sqlalchemy.engine to use in the table query
     :return: all existing tables in a dict-like object, or the specified subset in a dict
     """
 
-    metadata = MetaData(get_engine())
-    metadata.reflect()
-
-    all_tables = metadata.tables
+    all_tables = _get_metadata(get_engine() if engine is None else engine).tables
 
     if table_names is None:
         return all_tables
@@ -116,7 +126,7 @@ def table_exists(table_or_name):
     return table is not None and table.exists()
 
 
-def create_table(table_name, index_cols=None, dropfirst=True, **column_types):
+def create_table(table_name, index_cols=None, dropfirst=True, engine=None, **column_types):
     """
     Creates a table in the database according to specified parameters
     :param table_name: the name of the table to create
@@ -127,7 +137,9 @@ def create_table(table_name, index_cols=None, dropfirst=True, **column_types):
             - values are valid index ops (see create_index)
             - comma-separated columns are indexed together
     :param dropfirst: drop any existing table if True, otherwise raise a ValueError if table exists
+    :param engine: an optional sqlalchemy.engine to use to create the table
     :param column_types: a dict where keys represent columns and values are column types:
+        * keys may have leading/trailing underscores to prevent name clashes with other function params
         * values may be strings indicating a type
         * values may also be classes defined in sqlalchemy.sql.sqltypes
         * unrecognized types default to unicode text type
@@ -135,20 +147,23 @@ def create_table(table_name, index_cols=None, dropfirst=True, **column_types):
     :return: the created table
     """
 
+    # Strip leading/trailing underscores to prevent arg name clashes
+    column_types = {c.strip("_"): t for c, t in column_types.items()}
+
     validate_sql_params(table=table_name, empty_message=f"No table name specified")
     validate_sql_params(
         column_names=[cname for cname in column_types.keys()],
         empty_message=f"No column names specified for {table_name}"
     )
 
-    meta = get_metadata()
+    meta = _get_metadata(get_engine() if engine is None else engine)
     exists = table_name in meta.tables
 
     if exists and not dropfirst:
         raise ValueError(f"Table already exists: {table_name}")
     elif exists and dropfirst:
         meta.tables[table_name].drop(checkfirst=True)
-        meta = get_metadata()
+        meta = _get_metadata(meta)
 
     cols = [Column(c, column_type_for(t)) for c, t in column_types.items()]
     table = Table(table_name, meta, *cols)
@@ -522,18 +537,17 @@ def create_foreign_key(table_or_name, column_name, related_column_or_name):
         * this value must be a string including the table name: 'other_table.col_to_reference'
     """
 
-    tables = get_tables()
-
     if isinstance(table_or_name, str):
-        table = tables.get(table_or_name)
+        table = get_table(table_or_name)
     else:
         table = table_or_name
 
-    if isinstance(related_column_or_name, str):
-        rel, col = related_column_or_name.split(".")
-        related = getattr(tables.get(rel), "columns", {}).get(col)
-    else:
+    if not isinstance(related_column_or_name, str):
         related = related_column_or_name
+    else:
+        rel, col = related_column_or_name.split(".")
+        related = get_tables(engine=table.bind)
+        related = getattr(related.get(rel), "columns", {}).get(col)
 
     validate_columns_in(table, [column_name], empty_table=table_or_name)
 
