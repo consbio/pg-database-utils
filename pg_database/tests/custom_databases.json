@@ -1,0 +1,6 @@
+{
+    "database-name": "test_pg_database",
+    "database-host": "custom_host",
+    "database-user": "custom_user",
+    "database-password": "custom_pass"
+}

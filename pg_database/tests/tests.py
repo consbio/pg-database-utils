@@ -17,6 +17,7 @@ from pg_database import conf
 from pg_database import schema
 from pg_database import sql
 from pg_database import types
+from pg_database import validation
 
 
 DJANGO_SETTINGS_VAR = conf.DJANGO_SETTINGS_VAR
@@ -457,6 +458,16 @@ def test_conf_settings_dbinfo(db_settings):
             reload_django_settings(conf.settings)
             conf.PgDatabaseSettings().database_info
 
+        # Test with custom values in config  and empty Django database
+        os.environ[DJANGO_SETTINGS_VAR] = dj_env.replace("settings", "custom_databases")
+        os.environ[ENVIRONMENT_VARIABLE] = db_env.replace("test_config", "custom_databases")
+        reload_django_settings(conf.settings)
+
+        assert not conf.PgDatabaseSettings().django_database
+        assert conf.PgDatabaseSettings().host == "custom_host"
+        assert conf.PgDatabaseSettings().password == "custom_pass"
+        assert conf.PgDatabaseSettings().username == "custom_user"
+
     # Test with valid db config and Django settings
 
     os.environ[DJANGO_SETTINGS_VAR] = dj_env
@@ -518,7 +529,9 @@ def test_conf_settings_props():
 
     invalid_props = (
         "database-engine", "database-name", "database-port",
-        "database-host", "database-user", "database-password"
+        "database-host", "database-user", "database-password",
+        "database-nope", "database_nope",
+        "django-nope", "django_nope", "NOPE",
     )
     for prop in invalid_props:
         assert getattr(test_settings, prop) is None
@@ -898,6 +911,8 @@ def test_drop_table(db_metadata):
 
 def test_get_engine(db_metadata):
 
+    # Test with invalid params
+
     with pytest.raises(ValueError, match="Invalid pooling params"):
         schema.get_engine(pooling_args=["not", "a", "dict"])
     with pytest.raises(ValueError, match="Invalid pooling params"):
@@ -905,9 +920,19 @@ def test_get_engine(db_metadata):
     with pytest.raises(ValueError, match="Pooling params require integer values"):
         schema.get_engine(pooling_args={"pool_size": 20, "max_overflow": "nope"})
 
+    # Test with default params
+
     test_metadata = MetaData(schema.get_engine())
     test_metadata.reflect()
     assert sorted(test_metadata.tables) == sorted(db_metadata.tables)
+
+    # Test with empty params provided
+
+    test_metadata = MetaData(schema.get_engine(connect_args={}, pooling_args={}))
+    test_metadata.reflect()
+    assert sorted(test_metadata.tables) == sorted(db_metadata.tables)
+
+    # Test with all params provided
 
     test_metadata = MetaData(schema.get_engine(
         connect_args={"sslmode": "require"},
@@ -919,19 +944,54 @@ def test_get_engine(db_metadata):
 
 def test_get_metadata(db_metadata):
 
+    # Test with invalid params
+
+    with pytest.raises(ValueError, match="Invalid pooling params"):
+        schema.get_metadata(pooling_args=["not", "a", "dict"])
     with pytest.raises(ValueError, match="Invalid pooling params"):
         schema.get_metadata(pooling_args={"not": "supported"})
     with pytest.raises(ValueError, match="Pooling params require integer values"):
         schema.get_metadata(pooling_args={"pool_size": 20, "max_overflow": "nope"})
 
+    # Test with default params
+
     test_metadata = schema.get_metadata()
     assert sorted(test_metadata.tables) == sorted(db_metadata.tables)
+
+    # Test with empty params provided
+
+    test_metadata = schema.get_metadata(connect_args={}, pooling_args={})
+    assert sorted(test_metadata.tables) == sorted(db_metadata.tables)
+
+    # Test with all params provided
 
     test_metadata = schema.get_metadata(
         connect_args={"sslmode": "require"},
         pooling_args={"pool_size": 20, "max_overflow": 0},
     )
     assert sorted(test_metadata.tables) == sorted(db_metadata.tables)
+
+
+def test_validate_pooling_params(db_metadata):
+
+    # Test with invalid params
+
+    with pytest.raises(ValueError, match="Invalid pooling params"):
+        validation.validate_pooling_params(["not", "a", "dict"])
+    with pytest.raises(ValueError, match="Invalid pooling params"):
+        validation.validate_pooling_params({"not": "supported"})
+    with pytest.raises(ValueError, match="Pooling params require integer values"):
+        validation.validate_pooling_params({"pool_size": 20, "max_overflow": "nope"})
+
+    # Test with empty params provided
+
+    assert validation.validate_pooling_params(None) == {}
+    assert validation.validate_pooling_params({}) == {}
+
+    # Test with all supported params provided
+
+    pooling_params = {"max_overflow": 0, "pool_recycle": 60, "pool_size": 20, "pool_timeout": 30}
+    assert validation.validate_pooling_params(pooling_params) == pooling_params
 
 
 def test_get_table(db_metadata):
@@ -969,6 +1029,14 @@ def test_get_tables(db_metadata):
     # Test for existance of tables specified as string
 
     some_tables = schema.get_tables(f"{table_name},nope")
+
+    assert len(some_tables) == 1
+    assert table_name in some_tables
+    assert some_tables[table_name].exists
+
+    # Test for existance of tables specified as list
+
+    some_tables = schema.get_tables(["nope", f"{table_name}"])
 
     assert len(some_tables) == 1
     assert table_name in some_tables
@@ -1262,7 +1330,6 @@ def test_update_rows(db_metadata):
         Row: pk, site_zip, size_zip_num, site_json
         """
         row = list(row)
-
         if row[-1]["number"] != "7350":
             row = None
         else:
@@ -1299,7 +1366,7 @@ def test_update_rows(db_metadata):
     # Test when there are no rows to update
 
     make_table(db_metadata, empty_table_name, SITE_TABLE_COLS)
-    sql.update_rows(empty_table_name, "pk", SITE_TABLE_COLS, update_zips)
+    sql.update_rows(empty_table_name, ["pk"], SITE_TABLE_COLS, update_zips)
 
     # Prepare a fully populated table
 
@@ -1348,7 +1415,7 @@ def test_update_rows(db_metadata):
 
     # Test updating none of the rows in the data table
 
-    sql.update_rows(test_table_name, "pk", target_cols, update_none, batch_size=3)
+    sql.update_rows(test_table_name, ["pk", "obj_order"], target_cols, update_none, batch_size=3)
 
     assert_records(db_metadata, test_table_name, target_data, target_cols)
     assert f"tmp_{test_table_name}" not in refresh_metadata(db_metadata).tables
@@ -1469,6 +1536,10 @@ def test_drop_foreign_key(db_metadata):
     test_table_name = ALL_TEST_TABLES[1]
 
     # Test with invalid parameters
+
+    schema.drop_foreign_key(None, "pk", checkfirst=True)
+    with pytest.raises(ValueError, match="No table named"):
+        schema.drop_foreign_key(None, "pk")
 
     schema.drop_foreign_key("nope", "pk", checkfirst=True)
     with pytest.raises(ValueError, match="No table named"):
