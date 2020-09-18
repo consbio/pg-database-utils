@@ -242,7 +242,7 @@ def alter_column_type(table_or_name, column_name, new_type, using=None):
 
     if using is not None:
         using = f"{column_name}::{using}"
-    if new_type != "bool":
+    elif new_type != "bool":
         using = f"{column_name}::{new_type}"
     else:
         using = f"CASE WHEN {column_name}::int=0 THEN FALSE WHEN {column_name} IS NULL THEN NULL ELSE TRUE END"
