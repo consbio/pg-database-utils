@@ -1,12 +1,15 @@
 import datetime
 import json
+import logging
 
 from frozendict import frozendict
+from geoalchemy2 import types as gistypes
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.sql import sqltypes
 
 from .conf import settings
 
+logger = logging.getLogger(__name__)
 
 COLUMN_TYPE_MAP = frozendict({
     "bool": sqltypes.Boolean,
@@ -14,6 +17,8 @@ COLUMN_TYPE_MAP = frozendict({
     "bigint": sqltypes.BigInteger,
     "binary": sqltypes.LargeBinary,
     "bytea": sqltypes.LargeBinary,
+    "geometry": gistypes.Geometry,
+    "geography": gistypes.Geography,
     "int": sqltypes.Integer,
     "integer": sqltypes.Integer,
     "float": sqltypes.Float,
@@ -25,9 +30,24 @@ COLUMN_TYPE_MAP = frozendict({
     "number": sqltypes.Numeric,
     "json": postgresql.json.JSON,
     "jsonb": postgresql.json.JSONB,
+    "raster": gistypes.Raster,
+    "string": sqltypes.UnicodeText,
     "text": sqltypes.UnicodeText,
+    "timestamp": sqltypes.DateTime,
     "unicode": sqltypes.UnicodeText,
     "varchar": sqltypes.UnicodeText,
+})
+
+SQL_TYPE_MAP = frozendict({
+    "big_integer": "bigint",
+    "binary": "bytea",
+    "datetime": "timestamp",
+    "double": "numeric",
+    "large_binary": "bytea",
+    "number": "numeric",
+    "string": "text",
+    "unicode": "text",
+    "unicode_text": "text",
 })
 
 DATE_FORMAT = settings.date_format
@@ -41,28 +61,28 @@ DATE_FORMAT_MAP = frozendict({
 })
 
 
-def column_type_for(col_type, default='unicode'):
+def column_type_for(column_type, default='unicode'):
     """
-    Helper to map incoming col_type to a sqlalchemy.sql.sqltypes class.
-    :param col_type: a string, sqltypes class or sqltypes instance to map
+    Helper to map incoming column_type to a sqlalchemy.sql.sqltypes class.
+    :param column_type: a string, sqltypes class or sqltypes instance to map
     :param default: the default column type to use if no mapping is possible
     """
-    if isinstance(col_type, sqltypes.TypeEngine):
-        return col_type
-    elif isinstance(col_type, type) and issubclass(col_type, sqltypes.TypeEngine):
-        return col_type
+    if isinstance(column_type, sqltypes.TypeEngine):
+        return column_type
+    elif isinstance(column_type, type) and issubclass(column_type, sqltypes.TypeEngine):
+        return column_type
     else:
-        return COLUMN_TYPE_MAP.get(col_type.lower(), COLUMN_TYPE_MAP[default])
+        return COLUMN_TYPE_MAP.get(column_type.lower(), COLUMN_TYPE_MAP[default])
 
 
-def to_date_string(col_type, value):
+def to_date_string(column_type, value):
     """
-    Helper to convert a value of type col_type to a sqlalchemy.sql.sqltypes class.
-    :param col_type: the date or datetime class, or a sqlalchemy.sql.sqltypes class
+    Helper to convert a value of type column_type to a sqlalchemy.sql.sqltypes class.
+    :param column_type: the date or datetime class, or a sqlalchemy.sql.sqltypes class
     :param value: a date or datetime instance, or a date formatted string value
     """
     str_format = DATE_FORMAT_MAP.get(type(value), DATETIME_FORMAT)
-    sql_format = DATE_FORMAT_MAP[col_type]
+    sql_format = DATE_FORMAT_MAP[column_type]
 
     if isinstance(value, datetime.date):
         # It will be either a date or a datetime instance
@@ -71,12 +91,31 @@ def to_date_string(col_type, value):
     return sql_format.format(value=value)
 
 
-def to_json_string(col_type, value):
+def to_json_string(column_type, value):
     """
-    Helper to convert a value of type col_type to a sqlalchemy.sql.sqltypes class.
-    :param col_type: a class inheriting from sqlalchemy.sql.sqltypes.JSON
+    Helper to convert a value of type column_type to a sqlalchemy.sql.sqltypes class.
+    :param column_type: a class inheriting from sqlalchemy.sql.sqltypes.JSON
     :param value: a JSON compatible value or a string containing JSON content
     """
     if isinstance(value, dict):
         value = json.dumps(value)
-    return f"'{value}'::{col_type.__name__}"
+    return f"'{value}'::{column_type.__name__}"
+
+
+def type_to_string(column_type):
+    """
+    Helper to derive SQL string value from the provided type
+    :param column_type: a string, or a sqlalchemy.sql.sqltypes class or instance
+    """
+    if hasattr(column_type, "__visit_name__"):
+        column_type = column_type.__visit_name__
+    if hasattr(column_type, "name"):
+        column_type = column_type.name
+
+    column_type = (column_type or "").lower()
+    if column_type in COLUMN_TYPE_MAP:
+        return SQL_TYPE_MAP.get(column_type, column_type)
+
+    logger.warning(f"type_to_string: unrecognized column type {column_type}")
+
+    return column_type

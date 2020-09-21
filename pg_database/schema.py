@@ -7,8 +7,9 @@ from sqlalchemy.schema import AddConstraint, DropConstraint, ForeignKeyConstrain
 from sqlalchemy.sql import and_, func, Select
 
 from .conf import settings
-from .types import column_type_for
-from .validation import validate_columns_in, validate_pooling_params, validate_sql_params, SQL_TYPE_REGEX
+from .types import column_type_for, type_to_string
+from .validation import validate_columns_in, validate_column_type, validate_pooling_params, validate_sql_params
+from .validation import SQL_TYPE_REGEX
 
 logger = logging.getLogger(__name__)
 
@@ -140,15 +141,13 @@ def create_table(table_name, index_cols=None, dropfirst=True, engine=None, **col
     :param engine: an optional sqlalchemy.engine to use to create the table
     :param column_types: a dict where keys represent columns and values are column types:
         * keys may have leading/trailing underscores to prevent name clashes with other function params
-        * values may be strings indicating a type
-        * values may also be classes defined in sqlalchemy.sql.sqltypes
-        * unrecognized types default to unicode text type
-        * see types.COLUMN_TYPE_MAP for string values that map to types
+        * values may be strings, or a sqlalchemy.sql.sqltypes.TypeEngine class or instance
+        :see types.COLUMN_TYPE_MAP: for string values that map to types
     :return: the created table
     """
 
-    # Strip leading/trailing underscores to prevent arg name clashes
-    column_types = {c.strip("_"): t for c, t in column_types.items()}
+    # Validate types and strip leading/trailing underscores from names to prevent arg name clashes
+    column_types = {c.strip("_"): validate_column_type(t) for c, t in column_types.items()}
 
     validate_sql_params(table=table_name, empty_message=f"No table name specified")
     validate_sql_params(
@@ -216,10 +215,10 @@ def alter_column_type(table_or_name, column_name, new_type, using=None):
     Alter a column existing in a given table
     :param table_or_name: a sqlalchemy table object or the name of a table with a column to alter
     :param column_name: the name of the column in the table to alter
-    :param new_type: indicates what type the column should be updated to:
-        * may be a string indicating the type
-        * may also be a class defined in sqlalchemy.sql.sqltypes
-        * see types.COLUMN_TYPE_MAP for string values that map to types
+    :param new_type: indicates what type the column should be updated to, which may be:
+        * a string indicating the type
+        * a sqlalchemy.sql.sqltypes.TypeEngine class or instance
+        :see types.COLUMN_TYPE_MAP: for string values that map to types
     :param using: an optional, custom SQL expression to follow double colon for column data conversion:
         ALTER TABLE t
         ALTER COLUMN c TYPE geometry     // new_type="geometry"
@@ -234,18 +233,25 @@ def alter_column_type(table_or_name, column_name, new_type, using=None):
         sql_engine = table_or_name.bind
 
     validate_sql_params(table=table_name, column=column_name)
+    validate_column_type(column_type=new_type)
 
-    if not new_type or not SQL_TYPE_REGEX.match(new_type):
-        raise ValueError(f"Invalid column type: {new_type}")
     if using and not SQL_TYPE_REGEX.match(using):
         raise ValueError(f"Invalid column conversion: {using}")
 
+    meta = _get_metadata(sql_engine).tables
+    old_type = type_to_string(meta[table_name].columns[column_name].type)
+    new_type = type_to_string(new_type)
+
     if using is not None:
         using = f"{column_name}::{using}"
-    elif new_type != "bool":
-        using = f"{column_name}::{new_type}"
-    else:
+    elif new_type in ("bool", "boolean"):
         using = f"CASE WHEN {column_name}::int=0 THEN FALSE WHEN {column_name} IS NULL THEN NULL ELSE TRUE END"
+    elif new_type in ("json", "jsonb"):
+        from_bytea = f"convert_from({column_name},'UTF8')::{new_type}"
+        from_other = f"{column_name}::text::{new_type}"
+        using = from_bytea if old_type == "bytea" else from_other
+    else:
+        using = f"{column_name}::{new_type}"
 
     alter_sql = f"ALTER TABLE {table_name} "
     alter_sql += f"ALTER COLUMN {column_name} TYPE {new_type} USING {using}"
@@ -263,8 +269,8 @@ def create_column(table_or_name, column_name, column_type, checkfirst=False, def
     :param column_name: the name of the column to create
     :param column_type: indicates what type the column should be:
         * may be a string indicating the type
-        * may also be a class defined in sqlalchemy.sql.sqltypes
-        * see types.COLUMN_TYPE_MAP for string values that map to types
+        * may also be a sqlalchemy.sql.sqltypes.TypeEngine class or instance
+        :see types.COLUMN_TYPE_MAP: for string values that map to types
     :param checkfirst: if True, log warning if column exists; otherwise raise a sqlalchemy error
     :param default: a default value to assign to the column
     :param nullable: make the column support NULL if True, otherwise NOT NULL
@@ -278,14 +284,14 @@ def create_column(table_or_name, column_name, column_type, checkfirst=False, def
         sql_engine = table_or_name.bind
 
     validate_sql_params(table=table_name, column=column_name)
-    if not column_type or not SQL_TYPE_REGEX.match(column_type):
-        raise ValueError(f"Invalid column type: {column_type}")
+    validate_column_type(column_type=column_type)
 
     str_default = isinstance(default, str)
     if str_default:
         validate_sql_params(default_value=default)
 
     alter_table = f"ALTER TABLE {table_name} "
+    column_type = type_to_string(column_type)
 
     if checkfirst:
         add_column = f"ADD COLUMN IF NOT EXISTS {column_name} {column_type}"

@@ -676,6 +676,96 @@ def db_metadata(db_engine):
             test_table.drop()
 
 
+def test_column_types():
+
+    inject_sql = "DROP USER 'postgres' IF EXISTS"
+
+    # Test with empty types
+    with pytest.raises(ValueError, match="Invalid column type: empty"):
+        validation.validate_column_type(None)
+    with pytest.raises(ValueError, match="Invalid column type: empty"):
+        validation.validate_column_type("")
+    # Test with simple and complex string types
+    with pytest.raises(ValueError, match="Invalid column type"):
+        validation.validate_column_type(inject_sql)
+    with pytest.raises(ValueError, match="Invalid column type"):
+        validation.validate_column_type("nope(POINT,4326)")
+    with pytest.raises(ValueError, match="Invalid column type"):
+        validation.validate_column_type(f"geometry({inject_sql})")
+    # Test with non-string types
+    with pytest.raises(ValueError, match="Invalid column type"):
+        validation.validate_column_type(["not", "a", "sqlalchemy.sql.sqltypes.TypeEngine"])
+
+    for byte_type in ("BYTEA", "BINARY"):
+        str_type = types.type_to_string(byte_type)
+        assert str_type == "bytea"
+        col_type = types.column_type_for(byte_type)
+        assert col_type == sqltypes.LargeBinary
+        assert col_type == types.COLUMN_TYPE_MAP[str_type]
+        assert validation.validate_column_type(str_type) == str_type
+        assert validation.validate_column_type(col_type) == col_type
+
+    for num_type in ("DOUBLE", "NUMERIC", "NUMBER"):
+        str_type = types.type_to_string(num_type)
+        assert str_type == "numeric"
+        col_type = types.column_type_for(num_type)
+        assert col_type == sqltypes.Numeric
+        assert col_type == types.COLUMN_TYPE_MAP[str_type]
+        assert validation.validate_column_type(str_type) == str_type
+        assert validation.validate_column_type(col_type) == col_type
+
+    for text_type in ("STRING", "TEXT", "UNICODE"):
+        str_type = types.type_to_string(text_type)
+        assert str_type == "text"
+        col_type = types.column_type_for(text_type)
+        assert col_type == sqltypes.UnicodeText
+        assert col_type == types.COLUMN_TYPE_MAP[str_type]
+        assert validation.validate_column_type(str_type) == str_type
+        assert validation.validate_column_type(col_type) == col_type
+
+    for time_type in ("DATETIME", "TIMESTAMP"):
+        str_type = types.type_to_string(time_type)
+        assert str_type == "timestamp"
+        col_type = types.column_type_for(time_type)
+        assert col_type == sqltypes.DateTime
+        assert col_type == types.COLUMN_TYPE_MAP[str_type]
+        assert validation.validate_column_type(str_type) == str_type
+        assert validation.validate_column_type(col_type) == col_type
+
+    for same_type in (
+        "BOOL", "BOOLEAN", "BIGINT", "DATE", "DECIMAL", "FLOAT", "GEOMETRY", "GEOGRAPHY",
+        "INT", "INTEGER", "JSON", "JSONB", "RASTER", "VARCHAR"
+    ):
+        str_type = types.type_to_string(same_type)
+        assert str_type == same_type.lower()
+        assert types.column_type_for(same_type) == types.COLUMN_TYPE_MAP[str_type]
+
+        assert validation.validate_column_type(str_type) == str_type
+        assert validation.validate_column_type(col_type) == col_type
+
+
+def test_pooling_params():
+
+    # Test with invalid params
+
+    with pytest.raises(ValueError, match="Invalid pooling params"):
+        validation.validate_pooling_params(["not", "a", "dict"])
+    with pytest.raises(ValueError, match="Invalid pooling params"):
+        validation.validate_pooling_params({"not": "supported"})
+    with pytest.raises(ValueError, match="Pooling params require integer values"):
+        validation.validate_pooling_params({"pool_size": 20, "max_overflow": "nope"})
+
+    # Test with empty params provided
+
+    assert validation.validate_pooling_params(None) == {}
+    assert validation.validate_pooling_params({}) == {}
+
+    # Test with all supported params provided
+
+    pooling_params = {"max_overflow": 0, "pool_recycle": 60, "pool_size": 20, "pool_timeout": 30}
+    assert validation.validate_pooling_params(pooling_params) == pooling_params
+
+
 def test_database_setup(db_metadata):
     database_query = db_metadata.bind.execute(
         "SELECT TRUE FROM pg_catalog.pg_database "
@@ -831,21 +921,21 @@ def test_create_table(db_metadata):
 
     # Test invalid table names
     with pytest.raises(ValueError, match="No table name specified"):
-        schema.create_table(None, col="string")
+        schema.create_table(None, col="varchar")
     with pytest.raises(ValueError, match="Invalid table name"):
-        schema.create_table(inject_sql, column_one="string")
+        schema.create_table(inject_sql, column_one="varchar")
     with pytest.raises(ValueError, match="Table already exists"):
         schema.create_table(table_name, dropfirst=False, **SITE_COL_TYPES)
     # Test invalid index columns
     with pytest.raises(ValueError, match="No column names specified"):
         schema.create_table("no_columns")
     with pytest.raises(ValueError, match="Invalid index column names"):
-        schema.create_table(tmp_table_name, index_cols="col,nope", col="string", dropfirst=True)
+        schema.create_table(tmp_table_name, index_cols="col,nope", col="varchar", dropfirst=True)
     with pytest.raises(ValueError, match="Invalid index column names"):
-        schema.create_table(tmp_table_name, index_cols=["col", "nope"], col="string", dropfirst=True)
+        schema.create_table(tmp_table_name, index_cols=["col", "nope"], col="varchar", dropfirst=True)
     with pytest.raises(ValueError, match="Invalid index column names"):
         schema.create_table(
-            tmp_table_name, index_cols={"col": "unique", "nope": "unique"}, col="string", dropfirst=True
+            tmp_table_name, index_cols={"col": "unique", "nope": "unique"}, col="varchar", dropfirst=True
         )
 
     column_types = dict(SITE_COL_TYPES)
@@ -875,7 +965,7 @@ def test_create_table(db_metadata):
     assert_table(db_metadata, table_name, target_types)
     assert_index(db_metadata, table_name, index_name=f"{table_name}_pk_obj_order_idx")
 
-    # Test with list of index columns
+    # Test with list of index columns and column type names
 
     refresh_metadata(db_metadata).tables[table_name].drop()
 
@@ -883,13 +973,13 @@ def test_create_table(db_metadata):
         table_name,
         index_cols=["pk", "obj_order"],
         dropfirst=False,
-        **{k: v.__name__ for k, v in column_types.items()}
+        **{k: types.type_to_string(v) for k, v in column_types.items()}
     )
     assert_table(db_metadata, table_name, target_types)
     assert_index(db_metadata, table_name, index_name=f"{table_name}_pk_idx")
     assert_index(db_metadata, table_name, index_name=f"{table_name}_obj_order_idx")
 
-    # Test with dict of index columns and types
+    # Test with dict of index columns and column type instances
 
     refresh_metadata(db_metadata).tables[table_name].drop()
 
@@ -984,28 +1074,6 @@ def test_get_metadata(db_metadata):
         pooling_args={"pool_size": 20, "max_overflow": 0},
     )
     assert sorted(test_metadata.tables) == sorted(db_metadata.tables)
-
-
-def test_validate_pooling_params(db_metadata):
-
-    # Test with invalid params
-
-    with pytest.raises(ValueError, match="Invalid pooling params"):
-        validation.validate_pooling_params(["not", "a", "dict"])
-    with pytest.raises(ValueError, match="Invalid pooling params"):
-        validation.validate_pooling_params({"not": "supported"})
-    with pytest.raises(ValueError, match="Pooling params require integer values"):
-        validation.validate_pooling_params({"pool_size": 20, "max_overflow": "nope"})
-
-    # Test with empty params provided
-
-    assert validation.validate_pooling_params(None) == {}
-    assert validation.validate_pooling_params({}) == {}
-
-    # Test with all supported params provided
-
-    pooling_params = {"max_overflow": 0, "pool_recycle": 60, "pool_size": 20, "pool_timeout": 30}
-    assert validation.validate_pooling_params(pooling_params) == pooling_params
 
 
 def test_get_table(db_metadata):
@@ -1683,6 +1751,39 @@ def test_alter_column_type(db_metadata):
     altered = refresh_metadata(db_metadata).tables.get(table_name).columns.test_bool
     assert str(altered.type).lower() == "boolean"
 
+    # JSON column tests
+
+    # Ensure original column is type JSONB
+    original = db_metadata.tables.get(table_name).columns.test_json
+    assert str(original.type).lower() == "jsonb"
+
+    # Test change from JSON to VARCHAR
+    schema.alter_column_type(db_metadata.tables[table_name], "test_json", "varchar")
+    altered = refresh_metadata(db_metadata).tables.get(table_name).columns.test_json
+    assert str(altered.type).lower() == "varchar"
+
+    # Test change from VARCHAR to BYTEA
+    schema.alter_column_type(db_metadata.tables[table_name], "test_json", "bytea")
+    altered = refresh_metadata(db_metadata).tables.get(table_name).columns.test_json
+    assert str(altered.type).lower() == "bytea"
+
+    # Test change from BYTEA back to JSONB
+    schema.alter_column_type(db_metadata.tables[table_name], "test_json", "jsonb")
+    altered = refresh_metadata(db_metadata).tables.get(table_name).columns.test_json
+    assert str(altered.type).lower() == "jsonb"
+
+    # Cross-type JSON conversion tests
+
+    # Test conversion of BOOLEAN to JSONB
+    schema.alter_column_type(db_metadata.tables[table_name], "test_bool", "jsonb")
+    altered = refresh_metadata(db_metadata).tables.get(table_name).columns.test_bool
+    assert str(altered.type).lower() == "jsonb"
+
+    # Test conversion of NUMERIC to JSONB
+    schema.alter_column_type(db_metadata.tables[table_name], "obj_order", "jsonb")
+    altered = refresh_metadata(db_metadata).tables.get(table_name).columns.obj_order
+    assert str(altered.type).lower() == "jsonb"
+
     # Geometry column tests
 
     # Ensure original column is type GEOMETRY (should be POINT)
@@ -1768,7 +1869,7 @@ def test_create_column(db_metadata):
     assert not newcol.nullable
 
     column = "test_int"
-    schema.create_column(site_table.name, column, "integer", default=50)
+    schema.create_column(site_table.name, column, sqltypes.Integer, default=50)
     newcol = refresh_metadata(db_metadata).tables[site_table.name].columns.get(column)
     assert column == newcol.name
     assert str(newcol.type).lower().startswith("integer")
@@ -1782,7 +1883,7 @@ def test_create_column(db_metadata):
     assert not newcol.nullable
 
     column = "test_jsonb"
-    schema.create_column(site_table.name, column, "jsonb", nullable=True)
+    schema.create_column(site_table.name, column, postgresql.json.JSONB, nullable=True)
     newcol = refresh_metadata(db_metadata).tables[site_table.name].columns.get(column)
     assert column == newcol.name
     assert str(newcol.type).lower().startswith("json")
