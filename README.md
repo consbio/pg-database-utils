@@ -114,7 +114,7 @@ schema.create_column("my_table", "json_col", "jsonb", checkfirst=True)
 schema.create_index("my_table", "json_col", index_op="json_full")
 
 # These steps require the postgis extension
-schema.alter_column_type("my_table", "geom", "geometry", using="geometry(Polygon,4326)")
+schema.alter_column_type("my_table", "geom", "geometry", using="geom::geometry(Polygon,4326)")
 schema.create_index("my_table", "geom", index_op="spatial")
 ```
 * Dropping database objects
@@ -197,7 +197,7 @@ values_data = [
 ]
 values_names = ["id", "val", "json", "boolean", "created"]
 values_types = ["int", "text", "jsonb", "bool", "date"]
-values_table = "new_table"
+values_table = "values_table"
 
 # SELECT INTO to create a new table from raw values using sslmode==require
 
