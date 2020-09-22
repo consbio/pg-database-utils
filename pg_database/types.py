@@ -107,13 +107,15 @@ def type_to_string(column_type):
     Helper to derive SQL string value from the provided type
     :param column_type: a string, or a sqlalchemy.sql.sqltypes class or instance
     """
-    if hasattr(column_type, "__visit_name__"):
-        column_type = column_type.__visit_name__
     if hasattr(column_type, "name"):
         column_type = column_type.name
+    if hasattr(column_type, "__visit_name__"):
+        column_type = column_type.__visit_name__
 
     column_type = (column_type or "").lower()
-    if column_type in COLUMN_TYPE_MAP:
+    if column_type in SQL_TYPE_MAP:
+        return SQL_TYPE_MAP[column_type]
+    elif column_type in COLUMN_TYPE_MAP:
         return SQL_TYPE_MAP.get(column_type, column_type)
 
     logger.warning(f"type_to_string: unrecognized column type {column_type}")

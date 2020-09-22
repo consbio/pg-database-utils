@@ -696,49 +696,85 @@ def test_column_types():
     with pytest.raises(ValueError, match="Invalid column type"):
         validation.validate_column_type(["not", "a", "sqlalchemy.sql.sqltypes.TypeEngine"])
 
+    for bool_type in ("BOOL", "BOOLEAN"):
+        str_type = types.type_to_string(bool_type)
+        col_type = types.column_type_for(bool_type)
+
+        assert str_type == bool_type.lower()
+        assert col_type == sqltypes.Boolean
+        assert col_type == types.COLUMN_TYPE_MAP[str_type]
+        assert types.type_to_string(col_type) == "boolean"
+
+        assert validation.validate_column_type(str_type) == str_type
+        assert validation.validate_column_type(col_type) == col_type
+
     for byte_type in ("BYTEA", "BINARY"):
         str_type = types.type_to_string(byte_type)
-        assert str_type == "bytea"
         col_type = types.column_type_for(byte_type)
+
+        assert str_type == "bytea"
         assert col_type == sqltypes.LargeBinary
         assert col_type == types.COLUMN_TYPE_MAP[str_type]
+        assert types.type_to_string(col_type) == str_type
+
         assert validation.validate_column_type(str_type) == str_type
         assert validation.validate_column_type(col_type) == col_type
 
-    for num_type in ("DOUBLE", "NUMERIC", "NUMBER"):
+    for int_type in ("INT", "INTEGER"):
+        str_type = types.type_to_string(int_type)
+        col_type = types.column_type_for(int_type)
+
+        assert str_type == int_type.lower()
+        assert col_type == sqltypes.Integer
+        assert col_type == types.COLUMN_TYPE_MAP[str_type]
+        assert types.type_to_string(col_type) == "integer"
+
+        assert validation.validate_column_type(str_type) == str_type
+        assert validation.validate_column_type(col_type) == col_type
+
+    for num_type in ("DECIMAL", "DOUBLE", "NUMERIC", "NUMBER"):
         str_type = types.type_to_string(num_type)
-        assert str_type == "numeric"
         col_type = types.column_type_for(num_type)
+
+        assert str_type in ("decimal", "numeric")
         assert col_type == sqltypes.Numeric
         assert col_type == types.COLUMN_TYPE_MAP[str_type]
+        assert types.type_to_string(col_type) in ("decimal", "numeric")
+
         assert validation.validate_column_type(str_type) == str_type
         assert validation.validate_column_type(col_type) == col_type
 
-    for text_type in ("STRING", "TEXT", "UNICODE"):
+    for text_type in ("STRING", "TEXT", "UNICODE", "VARCHAR"):
         str_type = types.type_to_string(text_type)
-        assert str_type == "text"
         col_type = types.column_type_for(text_type)
+
+        assert str_type in ("text", "varchar")
         assert col_type == sqltypes.UnicodeText
         assert col_type == types.COLUMN_TYPE_MAP[str_type]
+        assert types.type_to_string(col_type) in ("text", "varchar")
+
         assert validation.validate_column_type(str_type) == str_type
         assert validation.validate_column_type(col_type) == col_type
 
     for time_type in ("DATETIME", "TIMESTAMP"):
         str_type = types.type_to_string(time_type)
-        assert str_type == "timestamp"
         col_type = types.column_type_for(time_type)
+
+        assert str_type == "timestamp"
         assert col_type == sqltypes.DateTime
         assert col_type == types.COLUMN_TYPE_MAP[str_type]
+        assert types.type_to_string(col_type) == str_type
+
         assert validation.validate_column_type(str_type) == str_type
         assert validation.validate_column_type(col_type) == col_type
 
-    for same_type in (
-        "BOOL", "BOOLEAN", "BIGINT", "DATE", "DECIMAL", "FLOAT", "GEOMETRY", "GEOGRAPHY",
-        "INT", "INTEGER", "JSON", "JSONB", "RASTER", "VARCHAR"
-    ):
+    for same_type in ("BIGINT", "DATE", "FLOAT", "GEOMETRY", "GEOGRAPHY", "JSON", "JSONB", "RASTER"):
         str_type = types.type_to_string(same_type)
+        col_type = types.column_type_for(same_type)
+
         assert str_type == same_type.lower()
         assert types.column_type_for(same_type) == types.COLUMN_TYPE_MAP[str_type]
+        assert types.type_to_string(col_type) == str_type
 
         assert validation.validate_column_type(str_type) == str_type
         assert validation.validate_column_type(col_type) == col_type
