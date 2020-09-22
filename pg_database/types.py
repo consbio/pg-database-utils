@@ -113,10 +113,11 @@ def type_to_string(column_type):
         column_type = column_type.__visit_name__
 
     column_type = (column_type or "").lower()
+
     if column_type in SQL_TYPE_MAP:
         return SQL_TYPE_MAP[column_type]
     elif column_type in COLUMN_TYPE_MAP:
-        return SQL_TYPE_MAP.get(column_type, column_type)
+        return column_type
 
     logger.warning(f"type_to_string: unrecognized column type {column_type}")
 

@@ -7,6 +7,7 @@ from pg_database import types
 
 SAFE_SQL_REGEX = re.compile(r"^[0-9A-Za-z_]{1,63}$")
 SQL_TYPE_REGEX = re.compile(r"^[0-9A-Za-z_\(\),]+$")
+SQL_USING_REGEX = re.compile(r"^[0-9A-Za-z_\(\),:']+$")
 
 
 def validate_columns_in(table, column_names, empty_table, message=None):

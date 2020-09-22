@@ -9,7 +9,7 @@ from sqlalchemy.sql import and_, func, Select
 from .conf import settings
 from .types import column_type_for, type_to_string
 from .validation import validate_columns_in, validate_column_type, validate_pooling_params, validate_sql_params
-from .validation import SQL_TYPE_REGEX
+from .validation import SQL_USING_REGEX
 
 logger = logging.getLogger(__name__)
 
@@ -235,23 +235,24 @@ def alter_column_type(table_or_name, column_name, new_type, using=None):
     validate_sql_params(table=table_name, column=column_name)
     validate_column_type(column_type=new_type)
 
-    if using and not SQL_TYPE_REGEX.match(using):
+    if using and not SQL_USING_REGEX.match(using):
         raise ValueError(f"Invalid column conversion: {using}")
 
-    meta = _get_metadata(sql_engine).tables
-    old_type = type_to_string(meta[table_name].columns[column_name].type)
     new_type = type_to_string(new_type)
 
-    if using is not None:
-        using = f"{column_name}::{using}"
-    elif new_type in ("bool", "boolean"):
-        using = f"CASE WHEN {column_name}::int=0 THEN FALSE WHEN {column_name} IS NULL THEN NULL ELSE TRUE END"
-    elif new_type in ("json", "jsonb"):
-        from_bytea = f"convert_from({column_name},'UTF8')::{new_type}"
-        from_other = f"{column_name}::text::{new_type}"
-        using = from_bytea if old_type == "bytea" else from_other
-    else:
-        using = f"{column_name}::{new_type}"
+    if using is None:
+        old_type = type_to_string(_get_metadata(sql_engine).tables[table_name].columns[column_name].type)
+
+        if new_type == "bytea" and old_type in ("json", "jsonb"):
+            using = f"{column_name}::text::{new_type}"
+        elif new_type in ("bool", "boolean"):
+            using = f"CASE WHEN {column_name}::int=0 THEN FALSE WHEN {column_name} IS NULL THEN NULL ELSE TRUE END"
+        elif new_type in ("json", "jsonb"):
+            from_bytea = f"convert_from({column_name},'UTF8')::{new_type}"
+            from_other = f"{column_name}::text::{new_type}"
+            using = from_bytea if old_type == "bytea" else from_other
+        else:
+            using = f"{column_name}::{new_type}"
 
     alter_sql = f"ALTER TABLE {table_name} "
     alter_sql += f"ALTER COLUMN {column_name} TYPE {new_type} USING {using}"

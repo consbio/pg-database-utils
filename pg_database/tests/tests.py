@@ -4,8 +4,10 @@ import decimal
 import json
 import os
 import pytest
+import random
 import warnings
 
+from geoalchemy2 import types as gistypes
 from sqlalchemy import create_engine, Column, Index, Table, select
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine.url import URL
@@ -678,106 +680,76 @@ def db_metadata(db_engine):
 
 def test_column_types():
 
+    def assert_column_type(test_type, col_val, str_val=None, type_to_str_val=None):
+
+        lower = test_type.lower()
+        upper = test_type.upper()
+        test_type = ''.join(random.choice(c) for c in zip(upper, lower))
+
+        str_type = types.type_to_string(test_type)
+        col_type = types.column_type_for(test_type)
+
+        assert str_type == (str_val or lower), f"Wrong type_to_string for {test_type}"
+        assert col_type == col_val, f"Wrong column_type_for {test_type}"
+        assert col_type == types.COLUMN_TYPE_MAP[str_type], f"Wrong column type mapping for {test_type}"
+        assert types.type_to_string(col_type) == (type_to_str_val or str_type), (
+            f"Wrong type_to_string return conversion for {test_type}"
+        )
+
+        assert validation.validate_column_type(str_type) == str_type, f"String validation failed for {test_type}"
+        assert validation.validate_column_type(col_type) == col_type, f"Type validation failed for {test_type}"
+
+    # Test validation for invalid column type strings
+
     inject_sql = "DROP USER 'postgres' IF EXISTS"
 
-    # Test with empty types
+    # Test validate_column_type with empty types
     with pytest.raises(ValueError, match="Invalid column type: empty"):
         validation.validate_column_type(None)
     with pytest.raises(ValueError, match="Invalid column type: empty"):
         validation.validate_column_type("")
-    # Test with simple and complex string types
+    # Test validate_column_type with simple and complex string types
     with pytest.raises(ValueError, match="Invalid column type"):
         validation.validate_column_type(inject_sql)
     with pytest.raises(ValueError, match="Invalid column type"):
         validation.validate_column_type("nope(POINT,4326)")
     with pytest.raises(ValueError, match="Invalid column type"):
         validation.validate_column_type(f"geometry({inject_sql})")
-    # Test with non-string types
+    # Test validate_column_type with non-string types
     with pytest.raises(ValueError, match="Invalid column type"):
         validation.validate_column_type(["not", "a", "sqlalchemy.sql.sqltypes.TypeEngine"])
 
-    for bool_type in ("BOOL", "BOOLEAN"):
-        str_type = types.type_to_string(bool_type)
-        col_type = types.column_type_for(bool_type)
+    # Test all supported column type mappings and validation
 
-        assert str_type == bool_type.lower()
-        assert col_type == sqltypes.Boolean
-        assert col_type == types.COLUMN_TYPE_MAP[str_type]
-        assert types.type_to_string(col_type) == "boolean"
-
-        assert validation.validate_column_type(str_type) == str_type
-        assert validation.validate_column_type(col_type) == col_type
-
-    for byte_type in ("BYTEA", "BINARY"):
-        str_type = types.type_to_string(byte_type)
-        col_type = types.column_type_for(byte_type)
-
-        assert str_type == "bytea"
-        assert col_type == sqltypes.LargeBinary
-        assert col_type == types.COLUMN_TYPE_MAP[str_type]
-        assert types.type_to_string(col_type) == str_type
-
-        assert validation.validate_column_type(str_type) == str_type
-        assert validation.validate_column_type(col_type) == col_type
-
-    for int_type in ("INT", "INTEGER"):
-        str_type = types.type_to_string(int_type)
-        col_type = types.column_type_for(int_type)
-
-        assert str_type == int_type.lower()
-        assert col_type == sqltypes.Integer
-        assert col_type == types.COLUMN_TYPE_MAP[str_type]
-        assert types.type_to_string(col_type) == "integer"
-
-        assert validation.validate_column_type(str_type) == str_type
-        assert validation.validate_column_type(col_type) == col_type
-
-    for num_type in ("DECIMAL", "DOUBLE", "NUMERIC", "NUMBER"):
-        str_type = types.type_to_string(num_type)
-        col_type = types.column_type_for(num_type)
-
-        assert str_type in ("decimal", "numeric")
-        assert col_type == sqltypes.Numeric
-        assert col_type == types.COLUMN_TYPE_MAP[str_type]
-        assert types.type_to_string(col_type) in ("decimal", "numeric")
-
-        assert validation.validate_column_type(str_type) == str_type
-        assert validation.validate_column_type(col_type) == col_type
-
-    for text_type in ("STRING", "TEXT", "UNICODE", "VARCHAR"):
-        str_type = types.type_to_string(text_type)
-        col_type = types.column_type_for(text_type)
-
-        assert str_type in ("text", "varchar")
-        assert col_type == sqltypes.UnicodeText
-        assert col_type == types.COLUMN_TYPE_MAP[str_type]
-        assert types.type_to_string(col_type) in ("text", "varchar")
-
-        assert validation.validate_column_type(str_type) == str_type
-        assert validation.validate_column_type(col_type) == col_type
-
-    for time_type in ("DATETIME", "TIMESTAMP"):
-        str_type = types.type_to_string(time_type)
-        col_type = types.column_type_for(time_type)
-
-        assert str_type == "timestamp"
-        assert col_type == sqltypes.DateTime
-        assert col_type == types.COLUMN_TYPE_MAP[str_type]
-        assert types.type_to_string(col_type) == str_type
-
-        assert validation.validate_column_type(str_type) == str_type
-        assert validation.validate_column_type(col_type) == col_type
-
-    for same_type in ("BIGINT", "DATE", "FLOAT", "GEOMETRY", "GEOGRAPHY", "JSON", "JSONB", "RASTER"):
-        str_type = types.type_to_string(same_type)
-        col_type = types.column_type_for(same_type)
-
-        assert str_type == same_type.lower()
-        assert types.column_type_for(same_type) == types.COLUMN_TYPE_MAP[str_type]
-        assert types.type_to_string(col_type) == str_type
-
-        assert validation.validate_column_type(str_type) == str_type
-        assert validation.validate_column_type(col_type) == col_type
+    # Boolean related
+    assert_column_type("BOOL", sqltypes.Boolean, type_to_str_val="boolean")
+    assert_column_type("BOOLEAN", sqltypes.Boolean)
+    # Number related
+    assert_column_type("BIGINT", sqltypes.BigInteger)
+    assert_column_type("INT", sqltypes.Integer, type_to_str_val="integer")
+    assert_column_type("INTEGER", sqltypes.Integer)
+    assert_column_type("DECIMAL", sqltypes.Numeric, type_to_str_val="numeric")
+    assert_column_type("DOUBLE", sqltypes.Numeric, "numeric")
+    assert_column_type("FLOAT", sqltypes.Float)
+    assert_column_type("NUMERIC", sqltypes.Numeric)
+    assert_column_type("NUMBER", sqltypes.Numeric, "numeric")
+    # Date related
+    assert_column_type("DATE", sqltypes.Date)
+    assert_column_type("DATETIME", sqltypes.DateTime, "timestamp")
+    assert_column_type("TIMESTAMP", sqltypes.DateTime)
+    # Text related
+    assert_column_type("BYTEA", sqltypes.LargeBinary)
+    assert_column_type("BINARY", sqltypes.LargeBinary, "bytea")
+    assert_column_type("STRING", sqltypes.UnicodeText, "text")
+    assert_column_type("TEXT", sqltypes.UnicodeText)
+    assert_column_type("UNICODE", sqltypes.UnicodeText, "text")
+    assert_column_type("VARCHAR", sqltypes.UnicodeText, type_to_str_val="text")
+    # GIS and JSON related
+    assert_column_type("GEOMETRY", gistypes.Geometry)
+    assert_column_type("GEOGRAPHY", gistypes.Geography)
+    assert_column_type("RASTER", gistypes.Raster)
+    assert_column_type("JSON", postgresql.json.JSON)
+    assert_column_type("JSONB", postgresql.json.JSONB)
 
 
 def test_pooling_params():
@@ -1793,7 +1765,7 @@ def test_alter_column_type(db_metadata):
     original = db_metadata.tables.get(table_name).columns.test_json
     assert str(original.type).lower() == "jsonb"
 
-    # Test change from JSON to VARCHAR
+    # Test change from JSONB to VARCHAR
     schema.alter_column_type(db_metadata.tables[table_name], "test_json", "varchar")
     altered = refresh_metadata(db_metadata).tables.get(table_name).columns.test_json
     assert str(altered.type).lower() == "varchar"
@@ -1807,6 +1779,23 @@ def test_alter_column_type(db_metadata):
     schema.alter_column_type(db_metadata.tables[table_name], "test_json", "jsonb")
     altered = refresh_metadata(db_metadata).tables.get(table_name).columns.test_json
     assert str(altered.type).lower() == "jsonb"
+
+    # Test change from JSONB directly to BYTEA
+    schema.alter_column_type(db_metadata.tables[table_name], "test_json", "bytea")
+    altered = refresh_metadata(db_metadata).tables.get(table_name).columns.test_json
+    assert str(altered.type).lower() == "bytea"
+
+    # Test change from BYTEA back to JSONB with USING
+    using = "convert_from(test_json,'UTF8')::jsonb"
+    schema.alter_column_type(db_metadata.tables[table_name], "test_json", "jsonb", using=using)
+    altered = refresh_metadata(db_metadata).tables.get(table_name).columns.test_json
+    assert str(altered.type).lower() == "jsonb"
+
+    # Test change from JSONB directly to BYTEA with USING
+    using = "test_json::text::bytea"
+    schema.alter_column_type(db_metadata.tables[table_name], "test_json", "bytea", using=using)
+    altered = refresh_metadata(db_metadata).tables.get(table_name).columns.test_json
+    assert str(altered.type).lower() == "bytea"
 
     # Cross-type JSON conversion tests
 
@@ -1842,19 +1831,20 @@ def test_alter_column_type(db_metadata):
     assert str(altered.type).lower() == "text"
 
     # Test change from TEXT to POINT
-    schema.alter_column_type(db_metadata.tables[table_name], "test_geom", "geometry", using="geometry(POINT,4326)")
+    using = "test_geom::geometry(POINT,4326)"
+    schema.alter_column_type(db_metadata.tables[table_name], "test_geom", "geometry", using=using)
     altered = refresh_metadata(db_metadata).tables.get(table_name).columns.test_geom
     assert str(altered.type).lower().startswith("geometry")
 
     # Test change from POINT to LINE
-    schema.alter_column_type(
-        db_metadata.tables[table_name], "test_geom", "geometry", using="geometry(LINESTRING,4326)"
-    )
+    using = "test_geom::geometry(LINESTRING,4326)"
+    schema.alter_column_type(db_metadata.tables[table_name], "test_geom", "geometry", using=using)
     altered = refresh_metadata(db_metadata).tables.get(table_name).columns.test_geom
     assert str(altered.type).lower().startswith("geometry")
 
     # Test change from LINE to POLYGON
-    schema.alter_column_type(db_metadata.tables[table_name], "test_geom", "geometry", using="geometry(POLYGON,4326)")
+    using = "test_geom::geometry(POLYGON,4326)"
+    schema.alter_column_type(db_metadata.tables[table_name], "test_geom", "geometry", using=using)
     altered = refresh_metadata(db_metadata).tables.get(table_name).columns.test_geom
     assert str(altered.type).lower().startswith("geometry")
 
