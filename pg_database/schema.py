@@ -371,9 +371,9 @@ def drop_column(table_or_name, column_name, checkfirst=False):
     validate_sql_params(table=table_name, column=column_name)
 
     if checkfirst:
-        drop_sql = f"ALTER TABLE {table_name} DROP COLUMN IF EXISTS {column_name}"
+        drop_sql = f'ALTER TABLE {table_name} DROP COLUMN IF EXISTS "{column_name}"'
     else:
-        drop_sql = f"ALTER TABLE {table_name} DROP COLUMN {column_name}"
+        drop_sql = f'ALTER TABLE {table_name} DROP COLUMN "{column_name}"'
 
     logger.info(f"drop_column: dropping {table_name}.{column_name}")
 

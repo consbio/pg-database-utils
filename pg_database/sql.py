@@ -558,7 +558,7 @@ def _values(element, compiler, **kwargs):
     :see: https://www.postgresql.org/docs/current/queries-values.html
     """
 
-    value_cols = ",".join(element.cols)
+    value_cols = ",".join('"{}"'.format(c.strip("'\"")) for c in element.cols)
     value_sets = ", ".join(
         "({values})".format(
             values=",".join(_compile_value(compiler, val, element.types[idx]) for idx, val in enumerate(tup))

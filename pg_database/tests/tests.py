@@ -70,6 +70,7 @@ SITE_TABLE_COLS = (
     "test_geom",
     "test_line",
     "test_poly",
+    "TEST_CAPS",
 )
 SEARCHABLE_COLS = ("obj_hash", "site_addr", "site_city", "site_state", "site_zip", "countyname")
 
@@ -91,6 +92,7 @@ SITE_TEST_DATA = [
         "test_geom": None,
         "test_line": None,
         "test_poly": None,
+        "TEST_CAPS": "Test",
     },
     {
         "pk": "1",
@@ -109,6 +111,7 @@ SITE_TEST_DATA = [
         "test_geom": None,
         "test_line": None,
         "test_poly": None,
+        "TEST_CAPS": "Test",
     },
     {
         "pk": "2",
@@ -127,6 +130,7 @@ SITE_TEST_DATA = [
         "test_geom": None,
         "test_line": None,
         "test_poly": None,
+        "TEST_CAPS": "Test",
     },
     {
         "pk": "3",
@@ -145,6 +149,7 @@ SITE_TEST_DATA = [
         "test_geom": None,
         "test_line": None,
         "test_poly": None,
+        "TEST_CAPS": "Test",
     },
     {
         "pk": "4",
@@ -163,6 +168,7 @@ SITE_TEST_DATA = [
         "test_geom": None,
         "test_line": None,
         "test_poly": None,
+        "TEST_CAPS": "Test",
     },
     {
         "pk": "5",
@@ -181,6 +187,7 @@ SITE_TEST_DATA = [
         "test_geom": None,
         "test_line": None,
         "test_poly": None,
+        "TEST_CAPS": "Test",
     },
     {
         "pk": "6",
@@ -199,6 +206,7 @@ SITE_TEST_DATA = [
         "test_geom": None,
         "test_line": None,
         "test_poly": None,
+        "TEST_CAPS": "Test",
     },
     {
         "pk": "7",
@@ -217,6 +225,7 @@ SITE_TEST_DATA = [
         "test_geom": None,
         "test_line": None,
         "test_poly": None,
+        "TEST_CAPS": "Test",
     },
     {
         "pk": "8",
@@ -235,6 +244,7 @@ SITE_TEST_DATA = [
         "test_geom": None,
         "test_line": None,
         "test_poly": None,
+        "TEST_CAPS": "Test",
     },
 ]
 SITE_DATA_DICT = {obj["pk"]: obj for obj in SITE_TEST_DATA}
@@ -1951,6 +1961,13 @@ def test_drop_column(db_metadata):
     # Test for the presence and removal of an indexed column
 
     column = "obj_order"
+    assert column in site_table.columns
+    schema.drop_column(site_table, column)
+    assert column not in refresh_metadata(db_metadata).tables[site_table.name].columns
+
+    # Test that columns with upper case letters can be dropped
+
+    column = "TEST_CAPS"
     assert column in site_table.columns
     schema.drop_column(site_table, column)
     assert column not in refresh_metadata(db_metadata).tables[site_table.name].columns
