@@ -1,6 +1,6 @@
 # pg-database-utils
 
-[![Build Status](https://travis-ci.org/consbio/pg-database-utils.png?branch=main)](https://travis-ci.org/consbio/pg-database-utils)
+[![Build Status](https://api.travis-ci.com/consbio/pg-database-utils.png?branch=main)](https://app.travis-ci.com/github/consbio/pg-database-utils)
 [![Coverage Status](https://coveralls.io/repos/github/consbio/pg-database-utils/badge.svg?branch=main)](https://coveralls.io/github/consbio/pg-database-utils?branch=main)
 
 A suite of utilities for PostgreSQL database queries and operations built on sqlalchemy.

@@ -27,13 +27,13 @@ setup(
     long_description=long_description,
     long_description_content_type="text/markdown",
     keywords="postgres,postgresql,utils,utilities,pg_database,pg_database_utils,sqlalchemy",
-    version="0.8.1",
+    version="0.8.2",
     license="BSD",
     packages=[
         "pg_database", "pg_database.tests"
     ],
     install_requires=[
-        "frozendict>=1.2", "psycopg2-binary>=2.7.7", "sqlalchemy>=1.3.0", "GeoAlchemy2>=0.7.0"
+        "frozendict>=2.0", "psycopg2-binary>=2.7.7", "sqlalchemy==1.3.*", "GeoAlchemy2"
     ],
     tests_require=["pytest", "pytest-cov"],
     cmdclass={"test": RunTests}

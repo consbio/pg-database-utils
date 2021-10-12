@@ -1,0 +1,29 @@
+[tool.poetry]
+name = "pg-database-utils"
+version = "0.8.2"
+description = "A collection of performant parsing utilities"
+authors = ["dharvey-consbio <dani.harvey@consbio.org>"]
+keywords = ["postgres", "postgresql", "utils", "utilities", "pg_database", "pg_database_utils", "sqlalchemy"]
+readme = "README.md"
+homepage = "https://github.com/consbio/pg-database-utils/"
+repository = "https://github.com/consbio/pg-database-utils/"
+license = "BSD"
+packages = [
+    { include = "pg_database" },
+]
+
+[tool.poetry.dependencies]
+python = "^3.6"
+frozendict = "^2.0"
+psycopg2-binary = "^2.7.7"
+sqlalchemy = "1.3.*"
+GeoAlchemy2 = "*"
+
+[tool.poetry.dev-dependencies]
+pytest = "*"
+pytest-cov = "*"
+pipdeptree = "*"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
