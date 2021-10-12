@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "pg-database-utils"
 version = "0.8.2"
-description = "A collection of performant parsing utilities"
+description = "A suite of utilities for PostgreSQL database queries and operations built on sqlalchemy"
 authors = ["dharvey-consbio <dani.harvey@consbio.org>"]
 keywords = ["postgres", "postgresql", "utils", "utilities", "pg_database", "pg_database_utils", "sqlalchemy"]
 readme = "README.md"
