@@ -4,7 +4,7 @@ from geoalchemy2.types import Geometry
 from sqlalchemy import column, create_engine, exc, literal_column, select, table, text, Column, Table
 from sqlalchemy.engine.url import URL
 from sqlalchemy.schema import AddConstraint, DropConstraint, ForeignKeyConstraint, Index, MetaData
-from sqlalchemy.sql import and_, func, Select
+from sqlalchemy.sql import and_, func
 
 from .conf import settings
 from .types import column_type_for, type_to_string
@@ -525,7 +525,7 @@ def has_index(table_or_name, index_name):
         sql_engine = table_or_name.bind
 
     index_query = (
-        Select([literal_column("1")], distinct=True)
+        select([literal_column("1")], distinct=True)
         .select_from(table("pg_indexes"))
         .where(and_(column("tablename") == table_name, column("indexname") == index_name))
     )

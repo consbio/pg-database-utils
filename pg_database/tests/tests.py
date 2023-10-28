@@ -1579,7 +1579,7 @@ def test_values_clause(db_metadata):
     # Test INSERT INTO with VALUES clause
 
     insert_from = sql.Values(",".join(target_cols), ",".join(target_types), *target_values)
-    insert_vals = sql.Select([sql.column(c) for c in target_cols]).select_from(insert_from)
+    insert_vals = select([sql.column(c) for c in target_cols]).select_from(insert_from)
     insert_into = sql.Insert(into_table).from_select(names=target_cols, select=insert_vals)
     with schema.get_engine().connect() as conn:
         conn.execute(insert_into.execution_options(autocommit=True))

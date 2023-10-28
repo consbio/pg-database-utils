@@ -2,10 +2,10 @@ import json
 import logging
 
 from geoalchemy2.types import Geometry
-from sqlalchemy import column, exc, table, text
+from sqlalchemy import column, exc, text, select, LABEL_STYLE_DISAMBIGUATE_ONLY
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.compiler import compiles
-from sqlalchemy.sql import sqltypes, and_, or_, func, FromClause, Insert, Select, Update
+from sqlalchemy.sql import sqltypes, and_, or_, func, FromClause, Insert, Select, Update, coercions, roles
 
 from .schema import get_engine, get_table, get_tables, get_table_count, table_exists, drop_table
 from .types import column_type_for, to_date_string, to_json_string
@@ -57,9 +57,9 @@ def query_json_keys(table_or_name, column_name, query, limit=None):
     json_op = table.columns[column_name].op("@>")
 
     if isinstance(query, dict):
-        json_query = Select(table.columns).where(json_op(json.dumps(query)))
+        json_query = select(columns=table.columns).where(json_op(json.dumps(query)))
     else:
-        json_query = Select(table.columns).where(json_op(query))
+        json_query = select(columns=table.columns).where(json_op(query))
 
     return _query_limited(table, json_query, limit)
 
@@ -89,18 +89,13 @@ def query_tsvector_columns(table_or_name, column_names, query, limit=None):
 
     validate_columns_in(table, column_names, empty_table=table_or_name)
 
-    search_condition = func.to_tsvector(text("||' '||".join(column_names), postgresql.TSVECTOR)).match(
-        # Triple quotes required since `plainto_tsquery` cannot be directly invoked via sqlalchemy
-        # Calling `to_tsvector.match` generates the following, which results in a SQL syntax error
-        #    WHERE to_tsvector('english', <columns>) @@ to_tsquery('english', <query>)
-        # What we need is to use `plainto_tsquery`, or otherwise, make sure query is a valid tsquery string:
-        #    WHERE to_tsvector('english', <columns>) @@ plainto_tsquery('english', <query>)
-        # See: https://github.com/sqlalchemy/sqlalchemy/issues/3160 (for info on this issue in sqlalchemy)
-        f"'''{query}'''",
-        postgresql_regconfig="english",
+    search_condition = func.to_tsvector(
+        text("||' '||".join(column_names), postgresql.TSVECTOR)
+    ).bool_op("@@")(
+        func.plainto_tsquery("english", query)
     )
 
-    return _query_limited(table, Select(table.columns).distinct().where(search_condition), limit)
+    return _query_limited(table, select(table.columns).distinct().where(search_condition), limit)
 
 
 def update_from(table_name, into_table_name, join_columns, target_columns=None, engine=None):
@@ -239,7 +234,7 @@ def update_rows(table_name, join_columns, target_columns, update_row, batch_size
         with table.bind.connect() as conn:
             logger.info(f"update_rows: updating {table_name} with modified values in batches of {batch_size}\n")
 
-            select_query = conn.execute(Select(data_cols).execution_options(stream_results=True))
+            select_query = conn.execute(select(data_cols).execution_options(stream_results=True))
             table_created = False
 
             for offset in range(0, table_count, batch_size):
@@ -346,7 +341,7 @@ def insert_from(
     # Prepare query with specified columns and filtering
 
     if not join_columns:
-        insert_vals = Select(insert_cols).select_from(from_table)
+        insert_vals = select(insert_cols).select_from(from_table)
     else:
         log_message += f", excluding those matching: {join_columns}"
 
@@ -355,7 +350,7 @@ def insert_from(
             into_table, and_(*[from_cols[col] == into_cols[col] for col in join_columns])
         )
         insert_vals = (
-            Select(insert_cols)
+            select(insert_cols)
             .select_from(insert_from)
             .where(and_(*[into_cols[col].is_(None) for col in join_columns]))
         )
@@ -407,7 +402,7 @@ def insert_into(table_name, values, column_names, create_if_not_exists=False, in
     column_types = [str(into_table.columns[c].type) for c in column_names]
 
     insert_cols = [column(c) for c in column_names]
-    insert_vals = Select(insert_cols).select_from(Values(column_names, column_types, *values))
+    insert_vals = select(insert_cols).select_from(Values(column_names, column_types, *values))
     insert_into = Insert(into_table).from_select(names=column_names, select=insert_vals)
 
     with into_table.bind.connect() as conn:
@@ -514,8 +509,16 @@ class SelectInto(Select):
     :see: https://groups.google.com/forum/#!msg/sqlalchemy/O4M6srJYzk0/B8Umq9y08EoJ
     """
 
-    def __init__(self, columns, into, *arg, **kw):
-        super(SelectInto, self).__init__(columns, *arg, **kw)
+    _label_style = LABEL_STYLE_DISAMBIGUATE_ONLY
+
+    def __init__(self, columns, into):
+        self._raw_columns = [
+            coercions.expect(
+                roles.ColumnsClauseRole, c, apply_propagate_attrs=self
+            )
+            for c in columns
+        ]
+
         self.into = into
 
 
