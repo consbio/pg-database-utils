@@ -627,7 +627,7 @@ def db_drop(postgres_engine):
 def db_engine():
     """ Create a database engine for use in implementing tests """
 
-    postgres_engine = create_engine("postgresql:///postgres", isolation_level="AUTOCOMMIT")
+    postgres_engine = create_engine(URL(drivername="postgresql", username="postgres"), isolation_level="AUTOCOMMIT")
 
     db_create(postgres_engine)
     engine = create_engine(URL(**DATABASE_INFO))
@@ -1057,7 +1057,7 @@ def test_get_engine(db_metadata):
     # Test with all params provided
 
     test_metadata = MetaData(schema.get_engine(
-        connect_args={"sslmode": "require"},
+        connect_args={"sslmode": "prefer"},
         pooling_args={"pool_size": 20, "max_overflow": 0},
     ))
     test_metadata.reflect()
@@ -1088,7 +1088,7 @@ def test_get_metadata(db_metadata):
     # Test with all params provided
 
     test_metadata = schema.get_metadata(
-        connect_args={"sslmode": "require"},
+        connect_args={"sslmode": "prefer"},
         pooling_args={"pool_size": 20, "max_overflow": 0},
     )
     assert sorted(test_metadata.tables) == sorted(db_metadata.tables)
