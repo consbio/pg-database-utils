@@ -27,7 +27,7 @@ setup(
     long_description=long_description,
     long_description_content_type="text/markdown",
     keywords="postgres,postgresql,utils,utilities,pg_database,pg_database_utils,sqlalchemy",
-    version="0.8.3",
+    version="0.9.0",
     license="BSD",
     packages=[
         "pg_database", "pg_database.tests"
