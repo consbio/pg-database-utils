@@ -193,6 +193,10 @@ class PgDatabaseSettings(object):
         elif not self._database_config or self._database_config.get("django-db-key") != DEFAULT_DJANGO_DB:
             logger.debug("Applying Django database configuration")
 
+            from django.db import connections
+
+            django_databases = connections.settings
+
             django_db_key = self._database_config.get("django-db-key") or "default"
             if django_db_key not in django_databases:
                 raise EnvironmentError(f'No Django database configured for: "{django_db_key}"')
